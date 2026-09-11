@@ -1,0 +1,88 @@
+object ParticleSystem
+
+// Partículas prontas do SDK: pedacinhos que saem com velocidade, caem com gravidade e encolhem até sumir.
+//     var fx = spawn(ParticleSystem, posicao)
+//     fx.color = 0xFFD23F
+//     fx.burst(20)             // uma explosão
+// ou fx.emitting = true para um jato contínuo (`rate` por segundo). Com auto_destroy, o objeto some
+// sozinho quando não está emitindo e a última partícula acaba.
+
+var position = vec3(0, 0, 0)
+var color = 0xFFFFFF
+var size = 0.15            // tamanho inicial de cada pedaço
+var speed = 4
+var spread = 1             // 0 = só para cima, 1 = para todos os lados
+var gravity = 9
+var lifetime = 0.8         // segundos
+var rate = 30              // partículas por segundo com emitting = true
+var emitting = false
+var auto_destroy = true
+var max = 64               // tamanho do pool, fixo na criação: as partículas mais velhas são reaproveitadas
+
+var pos = []
+var vel = []
+var age = []               // -1 = livre
+var next = 0
+var carry = 0
+var used = false
+
+function create() {
+    for (var i = 0; i < max; i += 1) {
+        push(pos, position)
+        push(vel, vec3(0, 0, 0))
+        push(age, -1)
+    }
+}
+
+function burst(n) {
+    for (var i = 0; i < n; i += 1) {
+        emit()
+    }
+}
+
+function emit() {
+    var dir = vec3((math.random() * 2 - 1) * spread, 0.4 + math.random() * 0.8, (math.random() * 2 - 1) * spread)
+    pos[next] = position
+    vel[next] = dir * speed
+    age[next] = 0
+    next = (next + 1) % max
+    used = true
+}
+
+function update() {
+    var dt = time.delta
+    if (emitting) {
+        carry += rate * dt
+        while (carry >= 1) {
+            emit()
+            carry -= 1
+        }
+    }
+    var alive = 0
+    for (var i = 0; i < max; i += 1) {
+        if (age[i] >= 0) {
+            age[i] += dt
+            if (age[i] >= lifetime) {
+                age[i] = -1
+            } else {
+                var v = vel[i]
+                v.y -= gravity * dt
+                vel[i] = v
+                pos[i] = pos[i] + v * dt
+                alive += 1
+            }
+        }
+    }
+    if (auto_destroy && used && !emitting && alive == 0) {
+        destroy_self()
+    }
+}
+
+function draw() {
+    for (var i = 0; i < max; i += 1) {
+        if (age[i] >= 0) {
+            var k = 1 - age[i] / lifetime
+            render.mesh(Mesh.Cube, pos[i], vec3(age[i] * 500, age[i] * 300, 0), size * k, color)
+        }
+    }
+}

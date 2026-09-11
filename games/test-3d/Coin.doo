@@ -14,6 +14,10 @@ function on_collision(other) {
     if (type(other) == Player) {
         other.coins += 1
         audio.play("moeda.wav")
+        var brilho = spawn(ParticleSystem, position)   // prefab do SDK
+        brilho.color = 0xFFD23F
+        brilho.size = 0.12
+        brilho.burst(16)
         destroy_self()
     }
 }

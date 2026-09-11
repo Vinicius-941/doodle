@@ -1,38 +1,12 @@
-object Player
+object Player extends BasicCharacterController
 
-// Controle "tank" estilo PS1. A física (gravidade, chão, paredes) vem do Rigidbody.
-use Rigidbody
-use CapsuleCollider
-
-var heading = 0   // para onde olha, em graus
+// O herói do teste: o personagem pronto do SDK (andar, pular, câmera) + as moedas coletadas.
+var jump_sound = "pulo.wav"
 var coins = 0
 
 function update() {
-    var dt = time.delta
-    if (input.pressed(Button.Left))  { heading += 140 * dt }
-    if (input.pressed(Button.Right)) { heading -= 140 * dt }
-
-    var speed = 0
-    if (input.pressed(Button.Up))   { speed = 5 }
-    if (input.pressed(Button.Down)) { speed = -3 }
-    var move = forward() * speed
-    velocity.x = move.x
-    velocity.z = move.z
-
-    if (input.just_pressed(Button.A) && grounded) {
-        velocity.y = 7
-        audio.play("pulo.wav")
-    }
+    super.update()
     if (position.y < -20) {   // caiu pra fora do mapa
         position = vec3(0, 2, 0)
     }
-}
-
-function forward() {
-    var rad = heading * math.pi / 180
-    return vec3(math.sin(rad), 0, math.cos(rad))
-}
-
-function draw() {
-    render.mesh(Mesh.Capsule, position, vec3(0, heading, 0), 1, 0xF2F2F2)
 }

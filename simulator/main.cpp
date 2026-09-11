@@ -387,12 +387,20 @@ static std::vector<std::string> installedGames() {
     return ids;
 }
 
-// Every .doo of a program folder (one object each); main.doo first, since its object is the root.
-static std::vector<SourceFile> sources(const std::string& dir) {
+static std::vector<SourceFile> dooFiles(const std::string& dir) {
     std::vector<SourceFile> files;
     std::error_code ec;
     for (auto& e : fs::directory_iterator(root / fs::u8path(dir), ec))
         if (e.path().extension() == ".doo") files.push_back({dir + "/" + e.path().filename().u8string(), readFile(e.path())});
+    return files;
+}
+
+// SDK prefabs (BasicCharacterController, ParticleSystem...): objects written in Doo that every program gets.
+static std::vector<SourceFile> prefabs() { return dooFiles("sdk/prefabs"); }
+
+// Every .doo of a program folder (one object each); main.doo first, since its object is the root.
+static std::vector<SourceFile> sources(const std::string& dir) {
+    std::vector<SourceFile> files = dooFiles(dir);
     auto main = std::find_if(files.begin(), files.end(), [&](const SourceFile& f) { return f.file == dir + "/main.doo"; });
     if (main == files.end()) throw std::runtime_error(dir + "/main.doo não encontrado");
     std::iter_swap(files.begin(), main);
@@ -415,7 +423,7 @@ static void load(Program& prog, const std::string& id, const std::string& dir, c
     active = &prog;
     cam = {};  // each program starts with the default camera
     mode = -1;
-    auto defs = compileAll(sources(dir), vm, privileged);
+    auto defs = compileAll(sources(dir), vm, privileged, prefabs());
     for (auto& d : defs) prog.objects[d->name] = d;
     spawnIn(prog, defs[0], nullptr);
 }
@@ -803,7 +811,7 @@ static void frame() {
 static int checkAll() {
     auto check = [](const std::string& dir, bool privileged) {
         try {
-            compileAll(sources(dir), vm, privileged);
+            compileAll(sources(dir), vm, privileged, prefabs());
             printf("ok    %s\n", dir.c_str());
             return true;
         } catch (const std::exception& e) {

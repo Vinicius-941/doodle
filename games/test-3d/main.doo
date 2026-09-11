@@ -1,10 +1,10 @@
 object Test3D
 
-// Fase de teste 3D: monta o cenário com spawn, e cuida da câmera e do HUD.
+// Fase de teste 3D: monta o cenário com spawn e desenha o HUD. A câmera vem do Player
+// (BasicCharacterController, prefab do SDK).
 
 var player
 var total = 0
-var camy = 1
 
 function create() {
     block(vec3(0, -0.5, 0), vec3(80, 1, 80), 0x5E9E48, "")   // chão
@@ -28,6 +28,17 @@ function create() {
     casa.loop = true
     casa.range = 22
     casa.tocar()
+
+    var fumaca = spawn(ParticleSystem, vec3(-7, 3.4, 8))   // fumaça saindo do telhado (prefab do SDK, jato contínuo)
+    fumaca.color = 0xB8B8B8
+    fumaca.size = 0.3
+    fumaca.speed = 1.2
+    fumaca.spread = 0.25
+    fumaca.gravity = -1.5                                   // negativa: sobe
+    fumaca.lifetime = 2.2
+    fumaca.rate = 10
+    fumaca.emitting = true
+
     for (var i = 0; i < 6; i += 1) {                      // moedas em círculo
         var a = i * math.pi / 3 + 0.5
         coin(vec3(math.sin(a) * 9, 1, math.cos(a) * 9))
@@ -48,13 +59,7 @@ function coin(pos) {
 }
 
 function draw() {
-    // câmera atrás do jogador; a altura segue com atraso, então o pulo aparece e a escada também
-    var p = player.position
-    camy += (p.y - camy) * 4 * time.delta
-    var target = vec3(p.x, camy + 0.5, p.z)
     render.clear(0x7FB2E5)
-    render.camera(target - player.forward() * 7 + vec3(0, 3, 0), target, 60)
-
     render.text(20, 16, "Moedas: " + player.coins + " / " + total, 26, 0xFFFFFF)
     if (player.coins == total) {
         render.text(20, 50, "Você pegou todas!", 22, 0xFFE070)

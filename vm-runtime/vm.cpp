@@ -1,6 +1,8 @@
 #include "vm.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <random>
 
 // A live instance behind a ref, or nullptr if it was destroyed.
 static std::shared_ptr<Instance> live(const Ref& r) {
@@ -137,6 +139,14 @@ VM::VM() {
         auto inst = r ? r->p.lock() : nullptr;
         return Value(inst ? inst->def->name : std::string(typeName(a[0])));
     });
+    addNative("is", [](Instance&, std::vector<Value>& a) {  // is(obj, Type): obj is a Type or extends it
+        if (a.size() != 2) throw std::runtime_error("is() recebe 2 argumentos");
+        auto r = std::get_if<Ref>(&a[0]);
+        auto inst = r ? r->p.lock() : nullptr;
+        if (!inst) return Value(false);
+        auto& kinds = inst->def->kinds;
+        return Value(std::find(kinds.begin(), kinds.end(), toString(a[1])) != kinds.end());
+    });
     addNative("destroy_self", [](Instance& self, std::vector<Value>&) {
         self.alive = false;
         return Value();
@@ -151,6 +161,10 @@ VM::VM() {
         addNative(m.first, [fn = m.second](Instance&, std::vector<Value>& a) { return Value(fn(argNum(a, 0))); });
     addNative("math.min", [](Instance&, std::vector<Value>& a) { return Value(std::fmin(argNum(a, 0), argNum(a, 1))); });
     addNative("math.max", [](Instance&, std::vector<Value>& a) { return Value(std::fmax(argNum(a, 0), argNum(a, 1))); });
+    addNative("math.random", [](Instance&, std::vector<Value>&) {  // 0 <= x < 1
+        static std::mt19937 rng{std::random_device{}()};
+        return Value(std::uniform_real_distribution<double>(0, 1)(rng));
+    });
     constants["math.pi"] = Value(3.14159265358979323846);
     addNative("push", [](Instance&, std::vector<Value>& a) {  // push(array, value): appends in place
         auto arr = a.size() == 2 ? std::get_if<std::shared_ptr<Array>>(&a[0]) : nullptr;
@@ -296,6 +310,6 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
     } catch (const DooError&) {
         throw;  // already located by an inner frame
     } catch (const std::exception& e) {
-        throw DooError(self.def->file + ":" + std::to_string(f.lines[pc - 1]) + ": " + e.what() + " (em " + f.name + ")");
+        throw DooError(f.file + ":" + std::to_string(f.lines[pc - 1]) + ": " + e.what() + " (em " + f.name + ")");
     }
 }

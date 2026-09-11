@@ -1,0 +1,64 @@
+object BasicCharacterController
+
+// Personagem pronto do SDK (como os Starter Assets da Unity): anda, gira, pula e tem câmera em 3ª pessoa.
+// Use direto com spawn(BasicCharacterController, pos) ou estenda:
+//     object Heroi extends BasicCharacterController
+// e sobrescreva o que quiser (chame super.update() para manter o controle e a câmera).
+use Rigidbody
+use CapsuleCollider
+
+var heading = 0            // para onde olha, em graus
+var move_speed = 5         // unidades por segundo, para frente
+var back_speed = 3         // para trás
+var turn_speed = 140       // graus por segundo
+var jump_speed = 7
+var jump_sound = ""        // .wav opcional ao pular
+var color = 0xF2F2F2
+var follow_camera = true   // câmera atrás do personagem
+var camera_distance = 7
+var camera_height = 3
+var camera_y = 0           // altura da câmera, que segue com atraso (assim o pulo aparece na tela)
+
+function create() {
+    camera_y = position.y
+}
+
+function update() {
+    control()
+    if (follow_camera) {
+        camera()
+    }
+}
+
+function control() {   // controle "tank" estilo PS1: esquerda/direita giram, cima/baixo andam, A pula
+    var dt = time.delta
+    if (input.pressed(Button.Left))  { heading += turn_speed * dt }
+    if (input.pressed(Button.Right)) { heading -= turn_speed * dt }
+    var speed = 0
+    if (input.pressed(Button.Up))   { speed = move_speed }
+    if (input.pressed(Button.Down)) { speed = -back_speed }
+    var move = forward() * speed
+    velocity.x = move.x
+    velocity.z = move.z
+    if (input.just_pressed(Button.A) && grounded) {
+        velocity.y = jump_speed
+        if (jump_sound != "") {
+            audio.play(jump_sound)
+        }
+    }
+}
+
+function camera() {
+    camera_y += (position.y - camera_y) * math.min(1, 4 * time.delta)
+    var target = vec3(position.x, camera_y + 0.5, position.z)
+    render.camera(target - forward() * camera_distance + vec3(0, camera_height, 0), target, 60)
+}
+
+function forward() {
+    var rad = heading * math.pi / 180
+    return vec3(math.sin(rad), 0, math.cos(rad))
+}
+
+function draw() {
+    render.mesh(Mesh.Capsule, position, vec3(0, heading, 0), 1, color)
+}

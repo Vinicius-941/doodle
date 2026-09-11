@@ -81,6 +81,21 @@ struct FuncDecl {
     std::string name;
     std::vector<std::string> params;
     P body;
+    int line = 0;
+};
+
+struct FieldDecl {
+    std::string name;
+    P init;  // null: starts as nil
+};
+
+// One parsed .doo file, before its parent (extends) is merged in.
+struct Parsed {
+    std::string name, parent, file;
+    int line = 1;  // of the `object` declaration
+    std::vector<std::string> uses;
+    std::vector<FieldDecl> fields;
+    std::vector<FuncDecl> decls;
 };
 
 struct Parser {
@@ -279,11 +294,13 @@ struct Codegen {
     const VM& vm;
     bool privileged;
     const std::unordered_set<std::string>& objects;  // object names of the program: spawn(Enemy, ...)
+    const std::vector<const Parsed*>& chain;          // base first; the last one is `obj`
+    size_t owner = 0;                                 // whose code is being compiled (for super and errors)
     Function* f = nullptr;
     std::vector<std::pair<std::string, int>> scope;  // visible locals -> slot
     int line = 0;
 
-    DooError err(const std::string& m) const { return DooError(obj.file + ":" + std::to_string(line) + ": " + m); }
+    DooError err(const std::string& m) const { return DooError(chain[owner]->file + ":" + std::to_string(line) + ": " + m); }
     void emit(int x) { f->code.push_back(x); f->lines.push_back(line); }
     void emit(int op, int a) { emit(op); emit(a); }
     int here() const { return (int)f->code.size(); }
@@ -301,7 +318,7 @@ struct Codegen {
     }
     int declare(const std::string& n) { scope.push_back({n, f->nlocals}); return f->nlocals++; }
 
-    void function(Function& fn, const std::vector<std::string>& params, Node* body) {
+    void function(Function& fn, const std::vector<std::string>& params, const Node* body) {
         f = &fn;
         scope.clear();
         for (auto& p : params) declare(p);
@@ -310,7 +327,7 @@ struct Codegen {
         emit(OP_RET);
     }
 
-    void stmt(Node* n) {
+    void stmt(const Node* n) {
         line = n->line;
         switch (n->kind) {
         case K::Block: {
@@ -369,7 +386,7 @@ struct Codegen {
         }
     }
 
-    void assign(Node* n) {
+    void assign(const Node* n) {
         Node* target = n->kids[0].get();
         std::string op = n->text.substr(0, n->text.size() - 1);  // "+=" -> "+", "=" -> ""
         if (target->kind == K::Member) {  // v.x = e / enemy.hp = e: set the member, then store v back (vec3 is a copy)
@@ -394,7 +411,7 @@ struct Codegen {
     }
 
     // `ns.name` where ns is not a variable -> "ns.name" (SDK namespace or constant), else ""
-    std::string qualified(Node* m) const {
+    std::string qualified(const Node* m) const {
         Node* base = m->kids[0].get();
         if (base->kind != K::Name || local(base->text) >= 0 || field(base->text) >= 0) return {};
         return base->text + "." + m->text;
@@ -408,7 +425,27 @@ struct Codegen {
         emit(argc);
     }
 
-    void call(Node* n) {
+    // super.f(args): the version of f from the nearest ancestor of the code's owner
+    bool superCall(const Node* n) {
+        Node* callee = n->kids[0].get();
+        if (callee->kind != K::Member || callee->kids[0]->kind != K::Name || callee->kids[0]->text != "super") return false;
+        if (local("super") >= 0 || field("super") >= 0) return false;
+        std::string target;
+        for (size_t k = owner; k-- > 0 && target.empty();)
+            for (auto& d : chain[k]->decls) if (d.name == callee->text) target = chain[k]->name + "." + d.name;
+        if (target.empty()) throw err("nenhum objeto pai de " + chain[owner]->name + " define " + callee->text + "()");
+        int idx = obj.funcIndex.at(target), argc = (int)n->kids.size() - 1;
+        if (obj.funcs[idx].arity != argc)
+            throw err(callee->text + "() recebe " + std::to_string(obj.funcs[idx].arity) + " argumento(s), veio " + std::to_string(argc));
+        for (size_t i = 1; i < n->kids.size(); i++) expr(n->kids[i].get());
+        line = n->line;
+        emit(OP_CALL, idx);
+        emit(argc);
+        return true;
+    }
+
+    void call(const Node* n) {
+        if (superCall(n)) return;
         Node* callee = n->kids[0].get();
         int argc = (int)n->kids.size() - 1;
         bool method = callee->kind == K::Member && qualified(callee).empty();  // enemy.take_damage(10)
@@ -429,7 +466,7 @@ struct Codegen {
         emit(argc);
     }
 
-    void expr(Node* n) {
+    void expr(const Node* n) {
         line = n->line;
         switch (n->kind) {
         case K::Lit:
@@ -482,100 +519,173 @@ struct Codegen {
     }
 };
 
-struct Parsed {
-    std::shared_ptr<ObjectDef> obj;
-    std::vector<P> inits;  // field initializers, parallel to obj->fields
-    std::vector<FuncDecl> decls;
-};
-
 static Parsed parse(const SourceFile& src, const VM& vm) {
     Parser ps{lex(src.source, src.file), 0, src.file};
     Parsed out;
-    out.obj = std::make_shared<ObjectDef>();
-    ObjectDef* obj = out.obj.get();
-    std::vector<P>& inits = out.inits;
-    std::vector<FuncDecl>& decls = out.decls;
-    obj->file = src.file;
+    out.file = src.file;
     ps.expect("object");
-    obj->name = ps.ident();
+    out.name = ps.ident();
+    out.line = ps.t[ps.p - 1].line;
+    if (ps.accept("extends")) out.parent = ps.ident();
 
     while (ps.peek().kind != Token::End) {
         if (ps.accept(";")) continue;
         if (ps.accept("use")) {
             std::string c = ps.ident();
             if (!vm.components.count(c)) throw ps.err("componente desconhecido '" + c + "'");
-            obj->uses.push_back(c);
+            out.uses.push_back(c);
         } else if (ps.accept("var")) {
             std::string name = ps.ident();
-            if (std::count(obj->fields.begin(), obj->fields.end(), name)) throw ps.err("'" + name + "' declarada duas vezes");
-            obj->fields.push_back(name);
-            inits.push_back(ps.accept("=") ? ps.expr() : nullptr);
+            for (auto& f : out.fields) if (f.name == name) throw ps.err("'" + name + "' declarada duas vezes");
+            P init = ps.accept("=") ? ps.expr() : nullptr;
+            out.fields.push_back({name, std::move(init)});
         } else if (ps.accept("function")) {
             FuncDecl d;
+            d.line = ps.t[ps.p - 1].line;
             d.name = ps.ident();
-            if (obj->funcIndex.count(d.name)) throw ps.err("função '" + d.name + "' declarada duas vezes");
-            obj->funcIndex[d.name] = (int)decls.size() + 1;
+            for (auto& o : out.decls) if (o.name == d.name) throw ps.err("função '" + d.name + "' declarada duas vezes");
             ps.expect("(");
             if (!ps.accept(")")) {
                 do d.params.push_back(ps.ident()); while (ps.accept(","));
                 ps.expect(")");
             }
             d.body = ps.block();
-            decls.push_back(std::move(d));
+            out.decls.push_back(std::move(d));
         } else {
             throw ps.err("esperado 'use', 'var' ou 'function', encontrado '" + ps.peek().text + "'");
-        }
-    }
-
-    // Fields the components bring (`use Rigidbody` -> velocity...), unless the object declared them itself.
-    for (auto& c : obj->uses) {
-        for (auto& [name, value] : vm.components.at(c)) {
-            if (std::count(obj->fields.begin(), obj->fields.end(), name)) continue;
-            obj->fields.push_back(name);
-            auto lit = std::make_unique<Node>();
-            lit->kind = K::Lit;
-            lit->line = 1;
-            lit->value = value;
-            inits.push_back(std::move(lit));
         }
     }
     return out;
 }
 
-static void generate(Parsed& p, const VM& vm, bool privileged, const std::unordered_set<std::string>& objects) {
-    ObjectDef& obj = *p.obj;
-    // All signatures first, so bodies can call functions declared further down.
-    obj.funcs.resize(p.decls.size() + 1);
-    obj.funcs[0].name = "__init";
-    for (size_t i = 0; i < p.decls.size(); i++) {
-        obj.funcs[i + 1].name = p.decls[i].name;
-        obj.funcs[i + 1].arity = (int)p.decls[i].params.size();
+using ParsedByName = std::unordered_map<std::string, const Parsed*>;
+
+static DooError errorAt(const Parsed& p, int line, const std::string& m) {
+    return DooError(p.file + ":" + std::to_string(line) + ": " + m);
+}
+
+static std::vector<const Parsed*> chainOf(const Parsed& x, const ParsedByName& all) {  // x and its ancestors, base first
+    std::vector<const Parsed*> chain{&x};
+    while (!chain.back()->parent.empty()) {
+        const Parsed& p = *chain.back();
+        auto it = all.find(p.parent);
+        if (it == all.end()) throw errorAt(p, p.line, "o objeto pai '" + p.parent + "' não existe");
+        if (std::count(chain.begin(), chain.end(), it->second)) throw errorAt(x, x.line, "herança em círculo passando por '" + x.name + "'");
+        chain.push_back(it->second);
     }
-    Codegen g{obj, vm, privileged, objects};
-    g.f = &obj.funcs[0];
-    for (size_t i = 0; i < p.inits.size(); i++) {
-        if (!p.inits[i]) continue;
-        g.expr(p.inits[i].get());
-        g.emit(OP_SET_FIELD, (int)i);
+    std::reverse(chain.begin(), chain.end());
+    return chain;
+}
+
+// The flat ObjectDef of x: fields, components and functions of its whole chain (base first).
+// Each object in the chain gets "Name.__init" (its own initializers, run base first so derived values win)
+// and "Name.f" per function; plain "f" is the most derived version, so every call is virtual.
+static std::shared_ptr<ObjectDef> generate(const Parsed& x, const ParsedByName& all, const VM& vm, bool privileged,
+                                           const std::unordered_set<std::string>& objects) {
+    auto chain = chainOf(x, all);
+    auto obj = std::make_shared<ObjectDef>();
+    obj->name = x.name;
+    obj->file = x.file;
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) obj->kinds.push_back((*it)->name);
+
+    auto slot = [&](const std::string& n) {
+        auto it = std::find(obj->fields.begin(), obj->fields.end(), n);
+        if (it != obj->fields.end()) return int(it - obj->fields.begin());
+        obj->fields.push_back(n);
+        return int(obj->fields.size()) - 1;
+    };
+    std::vector<std::vector<std::pair<int, const Node*>>> inits(chain.size());  // per object: field slot <- initializer
+    std::vector<P> defaults;                                                       // component defaults as literals
+    for (size_t k = 0; k < chain.size(); k++) {
+        const Parsed& a = *chain[k];
+        for (auto& f : a.fields) {
+            int s = slot(f.name);
+            if (f.init) inits[k].push_back({s, f.init.get()});
+        }
+        for (auto& c : a.uses) {  // `use Rigidbody` adds velocity..., unless declared already (here or by an ancestor)
+            if (!std::count(obj->uses.begin(), obj->uses.end(), c)) obj->uses.push_back(c);
+            for (auto& [name, value] : vm.components.at(c)) {
+                if (std::count(obj->fields.begin(), obj->fields.end(), name)) continue;
+                auto lit = std::make_unique<Node>();
+                lit->kind = K::Lit;
+                lit->line = a.line;
+                lit->value = value;
+                inits[k].push_back({slot(name), lit.get()});
+                defaults.push_back(std::move(lit));
+            }
+        }
+    }
+
+    // Every function slot first (bodies may call functions declared further down), then the code.
+    obj->funcs.resize(1);
+    obj->funcs[0].name = "__init";
+    obj->funcs[0].file = x.file;
+    auto add = [&](const std::string& key, const std::string& name, int arity, const std::string& file) {
+        obj->funcIndex[key] = (int)obj->funcs.size();
+        obj->funcs.emplace_back();
+        obj->funcs.back().name = name;
+        obj->funcs.back().arity = arity;
+        obj->funcs.back().file = file;
+        return (int)obj->funcs.size() - 1;
+    };
+    for (auto a : chain) add(a->name + ".__init", "__init", 0, a->file);
+    for (auto a : chain) {
+        for (auto& d : a->decls) {
+            int arity = (int)d.params.size();
+            auto prev = obj->funcIndex.find(d.name);
+            if (prev != obj->funcIndex.end() && obj->funcs[prev->second].arity != arity)
+                throw errorAt(*a, d.line, d.name + "() substitui a versão do pai, mas com " + std::to_string(arity) +
+                                              " parâmetro(s) em vez de " + std::to_string(obj->funcs[prev->second].arity));
+            int idx = add(a->name + "." + d.name, d.name, arity, a->file);
+            obj->funcIndex[d.name] = idx;
+        }
+    }
+
+    Codegen g{*obj, vm, privileged, objects, chain};
+    g.owner = chain.size() - 1;
+    g.f = &obj->funcs[0];
+    for (auto a : chain) {
+        g.emit(OP_CALL, obj->funcIndex.at(a->name + ".__init"));
+        g.emit(0);
+        g.emit(OP_POP);
     }
     g.emit(OP_NIL);
     g.emit(OP_RET);
-    for (size_t i = 0; i < p.decls.size(); i++) g.function(obj.funcs[i + 1], p.decls[i].params, p.decls[i].body.get());
+    for (size_t k = 0; k < chain.size(); k++) {
+        g.owner = k;
+        g.f = &obj->funcs[obj->funcIndex.at(chain[k]->name + ".__init")];
+        g.scope.clear();
+        for (auto& [s, init] : inits[k]) {
+            g.expr(init);
+            g.emit(OP_SET_FIELD, s);
+        }
+        g.emit(OP_NIL);
+        g.emit(OP_RET);
+        for (auto& d : chain[k]->decls)
+            g.function(obj->funcs[obj->funcIndex.at(chain[k]->name + "." + d.name)], d.params, d.body.get());
+    }
+    return obj;
 }
 
-std::vector<std::shared_ptr<ObjectDef>> compileAll(const std::vector<SourceFile>& files, const VM& vm, bool privileged) {
+std::vector<std::shared_ptr<ObjectDef>> compileAll(const std::vector<SourceFile>& files, const VM& vm, bool privileged,
+                                                   const std::vector<SourceFile>& library) {
     std::vector<Parsed> parsed;
+    for (auto& f : files) parsed.push_back(parse(f, vm));
+    for (auto& f : library) parsed.push_back(parse(f, vm));
+    ParsedByName all;  // pointers into `parsed`, which no longer grows
     std::unordered_set<std::string> names;
-    for (auto& f : files) {
-        parsed.push_back(parse(f, vm));
-        if (!names.insert(parsed.back().obj->name).second)
-            throw DooError(f.file + ":1: o objeto '" + parsed.back().obj->name + "' já existe em outro arquivo");
+    for (size_t i = 0; i < parsed.size(); i++) {
+        Parsed& p = parsed[i];
+        if (all.count(p.name)) {
+            if (i < files.size()) throw errorAt(p, p.line, "o objeto '" + p.name + "' já existe em outro arquivo");
+            continue;  // the program's own object wins over an SDK prefab with the same name
+        }
+        all[p.name] = &p;
+        names.insert(p.name);
     }
     std::vector<std::shared_ptr<ObjectDef>> out;
-    for (auto& p : parsed) {
-        generate(p, vm, privileged, names);
-        out.push_back(p.obj);
-    }
+    for (auto& p : parsed)
+        if (all.at(p.name) == &p) out.push_back(generate(p, all, vm, privileged, names));
     return out;
 }
 

@@ -1,6 +1,7 @@
 // Compiler + VM self-check: one Doo object exercising the language subset.
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <unordered_map>
 #include "compiler.h"
 #include "obj.h"
@@ -93,9 +94,33 @@ function on_collision(other) { if (type(other) == Floor) { hits += 1 } }
 )"};
 static const SourceFile floorSrc = {"floor.doo", "object Floor\nuse BoxCollider\n"};
 
+// Inheritance: merged fields/functions, derived initializers win, virtual calls, super, errors in the parent's file.
+static const SourceFile animalSrc = {"animal.doo", R"doo(object Animal
+var sound = "..."
+var legs = 4
+function name() { return "animal" }
+function speak() { return name() + " diz " + sound }
+function describe() { return speak() + " (" + legs + " patas)" }
+function boom() { var a = []
+ return a[1] }
+)doo"};
+static const SourceFile birdSrc = {"bird.doo", R"doo(object Bird extends Animal
+var sound = "piu"
+var legs = 2
+var wings = 2
+function name() { return "pássaro" }
+function describe() { return super.describe() + " e " + wings + " asas" }
+)doo"};
+
 static bool throws(const char* code, const VM& vm, const char* expectedPrefix) {
     try { compile(code, "x.doo", vm, false); }
     catch (const DooError& e) { return std::string(e.what()).rfind(expectedPrefix, 0) == 0; }
+    return false;
+}
+
+static bool throwsAll(const std::vector<SourceFile>& files, const std::vector<SourceFile>& library, const VM& vm, const char* prefix) {
+    try { compileAll(files, vm, false, library); }
+    catch (const DooError& e) { return std::string(e.what()).rfind(prefix, 0) == 0; }
     return false;
 }
 
@@ -134,6 +159,39 @@ int main() {
     CHECK(throws("object X\nfunction f() { system.launch(\"a\") }", vm, "x.doo:2:"));     // firmware-only API
     CHECK(throws("object X\nuse Foo", vm, "x.doo:2:"));                                   // unknown component
     CHECK(compile("object X\nfunction f() { system.launch(\"a\") }", "fw.doo", vm, true)); // ...allowed when privileged
+
+    auto birds = compileAll({birdSrc}, vm, false, {animalSrc});  // Animal comes from the library, like an SDK prefab
+    CHECK(birds.size() == 2 && birds[0]->name == "Bird");
+    auto bird = vm.instantiate(birds[0]);
+    CHECK(std::get<std::string>(vm.call(*bird, "describe")) == "pássaro diz piu (2 patas) e 2 asas");
+    std::vector<Value> isArgs = {Value(Ref{bird}), Value(std::string("Animal"))};
+    CHECK(std::get<bool>(vm.natives[vm.nativeIndex.at("is")](*bird, isArgs)));
+    try { vm.call(*bird, "boom"); CHECK(false); }
+    catch (const DooError& e) { CHECK(std::string(e.what()).rfind("animal.doo:8:", 0) == 0); }  // inherited code: parent's file
+    auto own = compileAll({{"meu.doo", "object Animal\nfunction name() { return \"meu\" }"}}, vm, false, {animalSrc});
+    CHECK(own.size() == 1 && std::get<std::string>(vm.call(*vm.instantiate(own[0]), "name")) == "meu");  // program beats library
+    SourceFile a = {"a.doo", "object A\nfunction name() { return 1 }"};
+    CHECK(throwsAll({{"b.doo", "object B extends A\nfunction name(x) { return x }"}}, {a}, vm, "b.doo:2:"));  // override arity
+    CHECK(throwsAll({{"c.doo", "object C extends Nada"}}, {}, vm, "c.doo:1:"));                                // unknown parent
+    CHECK(throwsAll({{"d.doo", "object D extends A\nfunction f() { return super.f() }"}}, {a}, vm, "d.doo:2:"));  // nothing to super
+    std::vector<Value> none;
+    double r = std::get<double>(vm.natives[vm.nativeIndex.at("math.random")](*bird, none));
+    CHECK(r >= 0 && r < 1);
+
+    // SDK prefab ParticleSystem (the real file): a burst draws each live particle, then it removes itself
+    int meshes = 0;
+    vm.constants["Mesh.Cube"] = Value(0.0);
+    vm.addNative("render.mesh", [&](Instance&, std::vector<Value>&) { meshes++; return Value(); });
+    vm.addNative("time.delta", [](Instance&, std::vector<Value>&) { return Value(0.1); });
+    std::ifstream pf(DOODLE_ROOT "/sdk/prefabs/ParticleSystem.doo", std::ios::binary);
+    auto fx = vm.instantiate(compile({std::istreambuf_iterator<char>(pf), {}}, "ParticleSystem.doo", vm, false));
+    vm.call(*fx, "create");
+    vm.call(*fx, "burst", {Value(16.0)});
+    vm.call(*fx, "update");
+    vm.call(*fx, "draw");
+    CHECK(meshes == 16 && fx->alive);
+    for (int i = 0; i < 9; i++) vm.call(*fx, "update");  // past the 0.8 s lifetime
+    CHECK(!fx->alive);                                   // auto_destroy
 
     for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc}, vm, false)) defs[d->name] = d;
     auto level = spawn("Level", {});

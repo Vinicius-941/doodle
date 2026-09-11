@@ -25,5 +25,6 @@ target_compile_definitions(doodle PRIVATE DOODLE_ROOT="${CMAKE_SOURCE_DIR}" UNIC
 enable_testing()
 add_executable(doo_test tests/doo_test.cpp)
 target_link_libraries(doo_test PRIVATE sdk)
+target_compile_definitions(doo_test PRIVATE DOODLE_ROOT="${CMAKE_SOURCE_DIR}")  # tests the SDK prefabs too
 add_test(NAME doo_test COMMAND doo_test)
 add_test(NAME doo_check COMMAND doodle --check)

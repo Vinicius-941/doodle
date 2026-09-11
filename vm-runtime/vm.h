@@ -47,19 +47,21 @@ enum Op : int {
 };
 
 struct Function {
-    std::string name;
+    std::string name, file;  // file: where the source is (an inherited function lives in the parent's file)
     int arity = 0, nlocals = 0;
     std::vector<int> code, lines;  // lines[i] = source line of code[i]
     std::vector<Value> consts;
 };
 
-// One .doo file = one object.
+// One .doo file = one object. With `extends`, the parent's fields, components and functions are
+// merged in at compile time (single inheritance), so an instance is always one flat ObjectDef.
 struct ObjectDef {
     std::string name, file;
+    std::vector<std::string> kinds;   // this object, then its parent, grandparent... (for is())
     std::vector<std::string> fields;
-    std::vector<std::string> uses;  // components: `use Rigidbody`
-    std::vector<Function> funcs;    // funcs[0] = __init (field initializers)
-    std::unordered_map<std::string, int> funcIndex;
+    std::vector<std::string> uses;    // components: `use Rigidbody`
+    std::vector<Function> funcs;      // funcs[0] = __init (field initializers)
+    std::unordered_map<std::string, int> funcIndex;  // "f" = most derived version, "Parent.f" = each version
 };
 
 struct Instance : std::enable_shared_from_this<Instance> {  // always created by make_shared (VM::instantiate)
@@ -83,7 +85,7 @@ public:
     // `use X` components -> fields they add (with defaults) when the object doesn't declare them
     std::unordered_map<std::string, std::vector<std::pair<std::string, Value>>> components;
 
-    VM();  // registers the language built-ins: len, push, print, type, destroy_self, vec3, math.*
+    VM();  // registers the language built-ins: len, push, print, type, is, destroy_self, vec3, math.*
     void addNative(const std::string& name, NativeFn fn);
     std::shared_ptr<Instance> instantiate(std::shared_ptr<ObjectDef> def);  // runs field initializers (not create)
     Value call(Instance& self, const std::string& fn, std::vector<Value> args = {});  // no-op if fn is undefined
