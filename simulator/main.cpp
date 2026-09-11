@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -25,6 +26,7 @@
 #include "compiler.h"
 #include "obj.h"
 #include "physics.h"
+#include "save.h"
 #include "wav.h"
 
 namespace fs = std::filesystem;
@@ -42,6 +44,7 @@ static const WORD padMap[NBUTTONS] = {
 
 // A running program (firmware or game): its objects and the instances alive in its scene.
 struct Program {
+    std::string id;  // game folder name, or "sistema" for the firmware (names its save file)
     std::unordered_map<std::string, std::shared_ptr<ObjectDef>> objects;
     std::vector<std::shared_ptr<Instance>> scene;  // scene[0] = the object from main.doo (the program's root)
     fs::path base;                                 // render.image paths are relative to this
@@ -174,14 +177,14 @@ static void buildMeshes() {
     gluDeleteQuadric(q);
 }
 
-static void setColor(double c) {
+static void setColor(double c, double alpha = 1) {
     int v = (int)c;
-    glColor3ub(GLubyte(v >> 16), GLubyte(v >> 8), GLubyte(v));
+    glColor4ub(GLubyte(v >> 16), GLubyte(v >> 8), GLubyte(v), GLubyte(std::clamp(alpha, 0.0, 1.0) * 255));
 }
 
-static void rect(double x, double y, double w, double h, double c) {
+static void rect(double x, double y, double w, double h, double c, double alpha = 1) {
     mode2D();
-    setColor(c);
+    setColor(c, alpha);
     glBegin(GL_QUADS);
     glVertex2d(x, y); glVertex2d(x + w, y); glVertex2d(x + w, y + h); glVertex2d(x, y + h);
     glEnd();
@@ -194,9 +197,9 @@ static std::wstring widen(const std::string& s) {
     return w;
 }
 
-static void textW(double x, double y, const std::wstring& s, double size, double c) {
+static void textW(double x, double y, const std::wstring& s, double size, double c, double alpha = 1) {
     mode2D();
-    setColor(c);
+    setColor(c, alpha);
     glPushMatrix();
     glTranslated(x, y + size * 0.8, 0);  // y = top of the text; glyph outlines sit on the baseline
     glScaled(size, -size, 1);            // glyphs are y-up, the screen is y-down
@@ -205,7 +208,9 @@ static void textW(double x, double y, const std::wstring& s, double size, double
     glPopMatrix();
 }
 
-static void text(double x, double y, const std::string& s, double size, double c) { textW(x, y, widen(s), size, c); }
+static void text(double x, double y, const std::string& s, double size, double c, double alpha = 1) {
+    textW(x, y, widen(s), size, c, alpha);
+}
 
 static double textWidth(const std::string& s, double size) {
     double w = 0;
@@ -272,11 +277,11 @@ struct Voice {
     double volume = 1, range = 0;   // range > 0 = positional (fades out with distance to the camera)
 };
 static IXAudio2* xaudio;  // null when there is no audio device: games run muted
+static IXAudio2MasteringVoice* master;  // its volume = system volume (firmware settings)
 static std::vector<Voice> voices;
 static int nextVoiceId = 1;
 
 static void initAudio() {
-    IXAudio2MasteringVoice* master = nullptr;
     if (FAILED(XAudio2Create(&xaudio, 0, XAUDIO2_DEFAULT_PROCESSOR)) || FAILED(xaudio->CreateMasteringVoice(&master))) {
         xaudio = nullptr;
         fprintf(stderr, "aviso: nenhum dispositivo de áudio, os jogos vão rodar mudos\n");
@@ -403,8 +408,9 @@ static std::shared_ptr<Instance> spawnIn(Program& prog, const std::shared_ptr<Ob
     return inst;
 }
 
-static void load(Program& prog, const std::string& dir, const fs::path& base, bool privileged) {
+static void load(Program& prog, const std::string& id, const std::string& dir, const fs::path& base, bool privileged) {
     prog = Program{};
+    prog.id = id;
     prog.base = base;
     active = &prog;
     cam = {};  // each program starts with the default camera
@@ -427,7 +433,7 @@ static void stopAllSounds() {
 static void bootFirmware() {
     stopAllSounds();
     game = Program{};
-    load(firmware, "firmware", root, true);
+    load(firmware, "sistema", "firmware", root, true);
 }
 
 static void backToFirmware() {  // a game's sounds (music loops included) end with it
@@ -456,6 +462,13 @@ static int button(Args& a) {
     int b = (int)argNum(a, 0);
     if (b < 0 || b >= NBUTTONS) throw std::runtime_error("botão inválido");
     return b;
+}
+
+static fs::path savePath(const std::string& id) { return root / "saves" / fs::u8path(id + ".sav"); }
+
+static std::map<std::string, Value> readSave(const std::string& id) {
+    std::error_code ec;
+    return fs::exists(savePath(id), ec) ? decodeSave(readFile(savePath(id))) : std::map<std::string, Value>{};
 }
 
 static std::map<fs::path, Wav> sounds;  // never evicted: playing voices point into these buffers
@@ -514,10 +527,14 @@ static void drawPart(GLuint list, GLuint tex, Vec3 rgb) {  // lit color x textur
     if (tex) {
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);  // crisp PS1-style texels in 3D
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     }
     glCallList(list);
     if (tex) glDisable(GL_TEXTURE_2D);
 }
+
+static double opt(Args& a, size_t i, double fallback) { return i < a.size() ? argNum(a, i) : fallback; }
 
 static void registerSdk() {
     for (int i = 0; i < NBUTTONS; i++) vm.constants["Button." + std::string(buttonNames[i])] = Value(double(i));
@@ -542,23 +559,37 @@ static void registerSdk() {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         return Value();
     });
-    vm.addNative("render.rect", [](Instance&, Args& a) {
-        rect(argNum(a, 0), argNum(a, 1), argNum(a, 2), argNum(a, 3), argNum(a, 4));
+    // 2D calls take an optional last `alpha` (0..1, default 1) for fades and translucent panels
+    vm.addNative("render.rect", [](Instance&, Args& a) {  // (x, y, w, h, color, alpha)
+        rect(argNum(a, 0), argNum(a, 1), argNum(a, 2), argNum(a, 3), argNum(a, 4), opt(a, 5, 1));
         return Value();
     });
-    vm.addNative("render.text", [](Instance&, Args& a) {
-        text(argNum(a, 0), argNum(a, 1), str(a, 2), argNum(a, 3), argNum(a, 4));
+    vm.addNative("render.gradient", [](Instance&, Args& a) {  // (x, y, w, h, top color, bottom color, top alpha, bottom alpha)
+        double x = argNum(a, 0), y = argNum(a, 1), w = argNum(a, 2), h = argNum(a, 3);
+        mode2D();
+        glBegin(GL_QUADS);
+        setColor(argNum(a, 4), opt(a, 6, 1));
+        glVertex2d(x, y); glVertex2d(x + w, y);
+        setColor(argNum(a, 5), opt(a, 7, 1));
+        glVertex2d(x + w, y + h); glVertex2d(x, y + h);
+        glEnd();
+        return Value();
+    });
+    vm.addNative("render.text", [](Instance&, Args& a) {  // (x, y, text, size, color, alpha)
+        text(argNum(a, 0), argNum(a, 1), str(a, 2), argNum(a, 3), argNum(a, 4), opt(a, 5, 1));
         return Value();
     });
     vm.addNative("render.text_width", [](Instance&, Args& a) { return Value(textWidth(str(a, 0), argNum(a, 1))); });
-    vm.addNative("render.image", [](Instance&, Args& a) {  // (path, x, y, w, h) -> false if the file is missing
+    vm.addNative("render.image", [](Instance&, Args& a) {  // (path, x, y, w, h, alpha) -> false if the file is missing
         const Image& img = image(active->base / fs::u8path(str(a, 0)));
         if (!img.tex) return Value(false);
         double x = argNum(a, 1), y = argNum(a, 2), w = argNum(a, 3), h = argNum(a, 4);
         mode2D();
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, img.tex);
-        glColor3ub(255, 255, 255);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);  // smooth when UI icons are scaled
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        setColor(0xFFFFFF, opt(a, 5, 1));
         glBegin(GL_QUADS);
         glTexCoord2d(0, 1); glVertex2d(x, y);  // screen y grows down, texture t grows up
         glTexCoord2d(1, 1); glVertex2d(x + w, y);
@@ -660,18 +691,66 @@ static void registerSdk() {
     });
 
     vm.addNative("time.delta", [](Instance&, Args&) { return Value(dt); });
+    auto now = [](const char* format) {  // local wall clock through strftime
+        time_t t = time(nullptr);
+        tm local;
+        localtime_s(&local, &t);
+        char buf[32];
+        strftime(buf, sizeof buf, format, &local);
+        return Value(std::string(buf));
+    };
+    vm.addNative("time.clock", [now](Instance&, Args&) { return now("%H:%M"); });
+    vm.addNative("time.date", [now](Instance&, Args&) { return now("%d/%m"); });
 
-    // store: local stubs until the real store exists
+    // store: installed games come from games/; saves live in saves/<id>.sav (the online store doesn't exist yet)
     vm.addNative("store.installed", [](Instance&, Args&) {
         auto list = std::make_shared<Array>();
         for (auto& id : installedGames()) list->push_back(Value(id));
         return Value(list);
     });
     vm.addNative("store.is_installed", [](Instance&, Args& a) { return Value(fs::exists(gameDir(str(a, 0)) / "main.doo")); });
-    vm.addNative("store.get_save_data", [](Instance&, Args&) { return Value(std::string()); });  // no saves yet
+    vm.addNative("store.title", [](Instance&, Args& a) {  // "titulo:" line of games/<id>/info.txt, else the id
+        std::string id = str(a, 0);
+        std::ifstream f(gameDir(id) / "info.txt");
+        for (std::string line; std::getline(f, line);) {
+            if (line.rfind("titulo:", 0) != 0) continue;
+            size_t b = line.find_first_not_of(" \t", 7), e = line.find_last_not_of(" \t\r");
+            if (b != std::string::npos) return Value(line.substr(b, e - b + 1));
+        }
+        return Value(id);
+    });
+    vm.addNative("store.save", [](Instance&, Args& a) {  // (key, value): the running program's own save data
+        if (a.size() < 2) throw std::runtime_error("store.save espera (chave, valor)");
+        auto kv = readSave(active->id);
+        kv[str(a, 0)] = a[1];
+        std::string text = encodeSave(kv);  // validates before touching the file
+        fs::create_directories(root / "saves");
+        std::ofstream(savePath(active->id), std::ios::binary) << text;
+        return Value();
+    });
+    vm.addNative("store.load", [](Instance&, Args& a) {  // (key, default)
+        auto kv = readSave(active->id);
+        auto it = kv.find(str(a, 0));
+        return it != kv.end() ? it->second : a.size() > 1 ? a[1] : Value();
+    });
+    vm.addNative("store.get_save_data", [](Instance&, Args& a) {  // a game's raw save ("" = none)
+        std::string id = str(a, 0);
+        if (active != &firmware && id != active->id) throw std::runtime_error("um jogo só pode ler o próprio save");
+        std::error_code ec;
+        return Value(fs::exists(savePath(id), ec) ? readFile(savePath(id)) : std::string());
+    });
 
     // system: firmware only (enforced by the compiler)
     vm.addNative("system.launch", [](Instance&, Args& a) { pendingLaunch = str(a, 0); return Value(); });
+    vm.addNative("system.set_volume", [](Instance&, Args& a) {  // 0..1, the whole console
+        if (master) master->SetVolume((float)std::clamp(argNum(a, 0), 0.0, 1.0));
+        return Value();
+    });
+    vm.addNative("system.delete_save", [](Instance&, Args& a) {
+        std::error_code ec;
+        fs::remove(savePath(str(a, 0)), ec);
+        return Value();
+    });
 }
 
 // ---------- main loop ----------
@@ -716,7 +795,7 @@ static void frame() {
         if (!pendingLaunch.empty()) {
             std::string id;
             id.swap(pendingLaunch);
-            load(game, "games/" + id, gameDir(id), false);
+            load(game, id, "games/" + id, gameDir(id), false);
         }
     });
 }

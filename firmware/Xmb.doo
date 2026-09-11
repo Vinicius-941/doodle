@@ -1,0 +1,310 @@
+object Xmb
+
+// Menu do sistema no estilo XMB (PS3/PSP): categorias na horizontal (esquerda/direita),
+// itens da categoria na vertical (cima/baixo). A abre, B volta, Y mostra as opções de um jogo.
+
+var cats = ["Configurações", "Jogos", "Loja"]
+var icones = ["firmware/icones/config.png", "firmware/icones/jogos.png", "firmware/icones/loja.png"]
+var cat = 1          // categoria atual (começa em Jogos)
+var sel = [0, 0, 0]  // item escolhido em cada categoria
+var cx = 1           // posições animadas, que correm atrás de cat e de sel[cat]
+var sy = 0
+var col = 150        // coluna das categorias e dos itens
+var row = 112        // linha dos ícones das categorias
+var t = 0
+var fade = 0         // entrada suave depois do boot
+
+var jogos = []       // pastas em games/
+var titulos = []
+
+var volume = 80      // configurações, salvas em saves/sistema.sav
+var tema = 0
+var temaNomes = ["Azul", "Verde", "Roxo", "Laranja", "Grafite"]
+var temaCores = [0x2A5BD7, 0x2E9A5A, 0x7A3FC0, 0xD0702A, 0x5A6070]
+
+var modo = ""        // "" navegando | "editar" (ajustando uma configuração) | "painel" | "opcoes"
+var painel = []      // linhas do painel de informação aberto
+var opcao = 0        // linha escolhida no menu de opções do jogo
+var opcoesNomes = ["Iniciar", "Apagar dados salvos", "Cancelar"]
+
+function create() {
+    jogos = store.installed()
+    for (var i = 0; i < len(jogos); i += 1) {
+        push(titulos, store.title(jogos[i]))
+    }
+    volume = store.load("volume", 80)
+    tema = math.max(0, math.min(len(temaNomes) - 1, store.load("tema", 0)))
+    system.set_volume(volume / 100)
+}
+
+// ---------- entrada ----------
+
+function update() {
+    var dt = time.delta
+    t += dt
+    fade = math.min(1, fade + dt * 1.6)
+    if (fade == 1) {   // sem entrada durante a transição do boot
+        if (modo == "editar") {
+            editar()
+        } else if (modo == "painel") {
+            if (input.just_pressed(Button.A) || input.just_pressed(Button.B)) {
+                modo = ""
+                audio.play(520, 50)
+            }
+        } else if (modo == "opcoes") {
+            opcoes()
+        } else {
+            navegar()
+        }
+    }
+    var k = math.min(1, dt * 12)
+    cx += (cat - cx) * k
+    sy += (sel[cat] - sy) * k
+}
+
+function navegar() {
+    var c = cat
+    if (input.just_pressed(Button.Right) && cat < 2) { cat += 1 }
+    if (input.just_pressed(Button.Left) && cat > 0) { cat -= 1 }
+    if (cat != c) {
+        sy = sel[cat]
+        tique()
+    }
+    if (input.just_pressed(Button.Down) && sel[cat] < contar(cat) - 1) {
+        sel[cat] += 1
+        tique()
+    }
+    if (input.just_pressed(Button.Up) && sel[cat] > 0) {
+        sel[cat] -= 1
+        tique()
+    }
+    if (input.just_pressed(Button.A)) {
+        abrir(cat, sel[cat])
+    }
+    if (input.just_pressed(Button.Y) && cat == 1 && len(jogos) > 0) {
+        modo = "opcoes"
+        opcao = 0
+        audio.play(880, 50)
+    }
+}
+
+function abrir(c, i) {
+    if (c == 0 && i < 2) {
+        modo = "editar"
+        audio.play(880, 50)
+    } else if (c == 0) {
+        mostrar(["Doodle", "Firmware 0.1 - linguagem Doo", "Tela 640 x 480 a 60 quadros por segundo", "Simulador para Windows"])
+    } else if (c == 1) {
+        if (len(jogos) > 0) {
+            iniciar(jogos[i])
+        }
+    } else {
+        mostrar(["Loja Doodle", "A loja digital ainda não está disponível.", "Destaques, busca e downloads chegam em breve."])
+    }
+}
+
+function editar() {
+    var d = 0
+    if (input.just_pressed(Button.Right)) { d = 1 }
+    if (input.just_pressed(Button.Left)) { d = -1 }
+    if (d != 0) {
+        if (sel[0] == 0) {
+            volume = math.max(0, math.min(100, volume + d * 10))
+            system.set_volume(volume / 100)
+        } else {
+            tema = (tema + d + len(temaNomes)) % len(temaNomes)
+        }
+        tique()
+    }
+    if (input.just_pressed(Button.A) || input.just_pressed(Button.B)) {
+        store.save("volume", volume)
+        store.save("tema", tema)
+        modo = ""
+        audio.play(520, 50)
+    }
+}
+
+function opcoes() {
+    if (input.just_pressed(Button.Down) && opcao < 2) {
+        opcao += 1
+        tique()
+    }
+    if (input.just_pressed(Button.Up) && opcao > 0) {
+        opcao -= 1
+        tique()
+    }
+    if (input.just_pressed(Button.B)) {
+        modo = ""
+        audio.play(520, 50)
+    }
+    if (input.just_pressed(Button.A)) {
+        var id = jogos[sel[1]]
+        modo = ""
+        if (opcao == 0) { iniciar(id) }
+        if (opcao == 1) {
+            system.delete_save(id)
+            audio.play(330, 150)
+        }
+    }
+}
+
+function iniciar(id) {
+    audio.play(988, 120)
+    system.launch(id)
+}
+
+function mostrar(linhas) {
+    painel = linhas
+    modo = "painel"
+    audio.play(880, 50)
+}
+
+function tique() {
+    audio.play(660, 30)
+}
+
+// ---------- itens ----------
+
+function contar(c) {
+    if (c == 0) { return 3 }
+    if (c == 1) { return math.max(1, len(jogos)) }
+    return 2
+}
+
+function rotulo(c, i) {
+    if (c == 0) { return ["Volume", "Tema", "Sobre o Doodle"][i] }
+    if (c == 1) { return "Nenhum jogo instalado" }
+    return ["Destaques", "Meus downloads"][i]
+}
+
+function valor(c, i) {
+    if (c == 0 && i == 0) { return volume + "%" }
+    if (c == 0 && i == 1) { return temaNomes[tema] }
+    return ""
+}
+
+function dica(c, i) {
+    if (c == 0 && i < 2) { return "A: ajustar" }
+    if (c == 0) { return "Versão do sistema" }
+    if (c == 1) { return "Coloque jogos na pasta games/" }
+    return "Em breve"
+}
+
+// ---------- desenho ----------
+
+function draw() {
+    fundo()
+
+    var hora = time.date() + "   " + time.clock()
+    render.text(610 - render.text_width(hora, 18), 20, hora, 18, 0xFFFFFF)
+
+    for (var c = 0; c < 3; c += 1) {
+        var x = col + (c - cx) * 130
+        var s = 44
+        var a = 0.5
+        if (c == cat) {
+            s = 60
+            a = 1
+        }
+        render.image(icones[c], x - s / 2, row - s / 2, s, s, a)
+    }
+    centrado(col, row + 36, cats[cat], 16, 1)
+
+    var n = contar(cat)
+    for (var i = 0; i < n; i += 1) {   // o item escolhido fica logo abaixo das categorias; os anteriores, acima
+        var d = i - sy
+        var y = 210 + d * 64
+        if (d < 0) { y = 210 + d * 164 }
+        if (d < -1) { y = 46 + (d + 1) * 64 }
+        if (y > -50 && y < 470) {
+            item(cat, i, y, i == sel[cat])
+        }
+    }
+
+    if (modo == "painel") {
+        render.rect(0, 0, 640, 480, 0x000000, 0.88)
+        for (var i = 0; i < len(painel); i += 1) {
+            var tam = 18
+            if (i == 0) { tam = 30 }
+            centrado(320, 140 + i * 42, painel[i], tam, 1)
+        }
+        centrado(320, 400, "A ou B: voltar", 15, 0.8)
+    }
+    if (modo == "opcoes") {   // menu lateral, como o do triângulo no PS3
+        render.rect(0, 0, 640, 480, 0x000000, 0.4)
+        render.rect(380, 0, 260, 480, 0x0A1020, 0.9)
+        render.text(396, 150, titulos[sel[1]], 20, 0xFFFFFF)
+        for (var i = 0; i < 3; i += 1) {
+            var oy = 196 + i * 38
+            if (i == opcao) { render.rect(384, oy - 6, 252, 34, 0xFFFFFF, 0.15) }
+            render.text(400, oy, opcoesNomes[i], 18, 0xFFFFFF)
+        }
+    }
+
+    var dicas = "A: abrir      Esquerda/Direita: categorias"
+    if (cat == 1) { dicas = "A: jogar      Y: opções      Esquerda/Direita: categorias" }
+    if (modo == "editar") { dicas = "Esquerda/Direita: ajustar      A: confirmar" }
+    if (modo == "opcoes") { dicas = "A: confirmar      B: voltar" }
+    if (modo != "painel") { render.text(30, 450, dicas, 14, 0xFFFFFF, 0.75) }
+
+    if (fade < 1) {   // sai do preto do boot
+        render.rect(0, 0, 640, 480, 0x000000, 1 - fade)
+    }
+}
+
+function item(c, i, y, on) {
+    var a = 0.6
+    if (on) {
+        a = 1
+        render.rect(col - 50, y - 38, 520, 76, 0xFFFFFF, 0.07 + 0.04 * math.sin(t * 3))   // brilho pulsando
+    }
+    if (c == 1 && len(jogos) > 0) {
+        var w = 96
+        var h = 53
+        if (on) {
+            w = 128
+            h = 70
+        }
+        if (!render.image("games/" + jogos[i] + "/icon.png", col - 40, y - h / 2, w, h, a)) {
+            render.rect(col - 40, y - h / 2, w, h, 0x607090, a)
+        }
+        render.text(col + 100, y - 16, titulos[i], 24, 0xFFFFFF, a)
+        if (on) {
+            var info = "Sem dados salvos"
+            if (store.get_save_data(jogos[i]) != "") { info = "Dados salvos" }
+            render.text(col + 100, y + 14, info, 14, 0xE0E8FF, 0.85)
+        }
+        return
+    }
+    render.image(icones[c], col - 16, y - 16, 32, 32, a)
+    render.text(col + 30, y - 14, rotulo(c, i), 22, 0xFFFFFF, a)
+    var v = valor(c, i)
+    if (v != "" && y > row) {   // itens acima das categorias mostram só o nome
+        if (on && modo == "editar") { v = "<   " + v + "   >" }
+        render.text(600 - render.text_width(v, 20), y - 12, v, 20, 0xFFFFFF, a)
+    }
+    if (on) {
+        render.text(col + 30, y + 14, dica(c, i), 14, 0xE0E8FF, 0.85)
+    }
+}
+
+function fundo() {   // gradiente na cor do tema + onda de luz ondulando, como no PS3
+    var c = temaCores[tema]
+    render.gradient(0, 0, 640, 480, escuro(c, 0.2), c)
+    for (var camada = 0; camada < 2; camada += 1) {
+        var v = 0.35 + camada * 0.25
+        for (var x = 0; x < 640; x += 4) {
+            var y = 330 + math.sin(x * 0.009 + t * v + camada * 2.1) * (34 + camada * 14) + math.sin(x * 0.023 - t * 0.7) * 8
+            render.gradient(x, y - 26, 4, 26, 0xFFFFFF, 0xFFFFFF, 0, 0.12)
+            render.gradient(x, y, 4, 26, 0xFFFFFF, 0xFFFFFF, 0.12, 0)
+        }
+    }
+}
+
+function escuro(c, k) {   // a mesma cor com brilho k (0..1)
+    return rgb(math.floor(c / 65536) % 256 * k, math.floor(c / 256) % 256 * k, c % 256 * k)
+}
+
+function centrado(x, y, s, size, a) {
+    render.text(x - render.text_width(s, size) / 2, y, s, size, 0xFFFFFF, a)
+}

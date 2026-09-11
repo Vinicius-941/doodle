@@ -83,7 +83,7 @@ public:
     // `use X` components -> fields they add (with defaults) when the object doesn't declare them
     std::unordered_map<std::string, std::vector<std::pair<std::string, Value>>> components;
 
-    VM();  // registers the language built-ins: len, print, type, destroy_self, vec3, math.*
+    VM();  // registers the language built-ins: len, push, print, type, destroy_self, vec3, math.*
     void addNative(const std::string& name, NativeFn fn);
     std::shared_ptr<Instance> instantiate(std::shared_ptr<ObjectDef> def);  // runs field initializers (not create)
     Value call(Instance& self, const std::string& fn, std::vector<Value> args = {});  // no-op if fn is undefined

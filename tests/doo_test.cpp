@@ -5,6 +5,7 @@
 #include "compiler.h"
 #include "obj.h"
 #include "physics.h"
+#include "save.h"
 #include "wav.h"
 
 #define CHECK(c) if (!(c)) { printf("FAIL linha %d: %s\n", __LINE__, #c); return 1; }
@@ -55,6 +56,13 @@ function vectors() {
 }
 
 function mathy() { return math.floor(math.sqrt(16.5)) + math.abs(-1) }
+
+function arrays() {
+    var a = []
+    push(a, 3)
+    push(a, 4)
+    return len(a) + a[1] + math.max(2, 7) + math.min(2, 7)
+}
 )";
 
 // Objects of one program talking through refs: spawn, method calls, fields, type().
@@ -116,6 +124,7 @@ int main() {
     CHECK((std::get<Vec3>(vm.call(*t, "vectors")) == Vec3{-1, 14, 5}));
     CHECK((std::get<Vec3>(t->fields[2]) == Vec3{1, 12, 3}));
     CHECK(std::get<double>(vm.call(*t, "mathy")) == 5);
+    CHECK(std::get<double>(vm.call(*t, "arrays")) == 15);
 
     try { vm.call(*t, "explode"); CHECK(false); }
     catch (const DooError& e) { CHECK(std::string(e.what()).rfind("t.doo:32:", 0) == 0); }  // runtime errors carry file:line
@@ -160,6 +169,12 @@ int main() {
                      '\0' + "data" + le32(4) + "wxyz");
     CHECK(w.format.size() == 18 && w.format[17] == 0 && w.format[0] == 1);
     CHECK(std::string(w.data.begin(), w.data.end()) == "wxyz");
+
+    // save data round-trip: exact numbers, strings with escapes, bools
+    std::map<std::string, Value> save = {{"x", Value(0.1 + 0.2)}, {"nome", Value(std::string("a\\b\n\tc\""))}, {"ok", Value(true)}};
+    auto back = decodeSave(encodeSave(save));
+    CHECK(back.size() == 3 && std::get<double>(back["x"]) == 0.1 + 0.2);
+    CHECK(std::get<std::string>(back["nome"]) == "a\\b\n\tc\"" && std::get<bool>(back["ok"]));
 
     puts("doo_test: ok");
     return 0;

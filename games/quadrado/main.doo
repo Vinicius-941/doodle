@@ -9,6 +9,7 @@ var colors = [0xFFCC00, 0x40E0D0, 0xFF5080]
 var ci = 0
 
 function create() {
+    ci = store.load("cor", 0) % len(colors)   // a última cor escolhida fica salva
     print("quadrado: create")
 }
 
@@ -22,6 +23,7 @@ function update() {
 
     if (input.just_pressed(Button.A)) {
         ci = (ci + 1) % len(colors)
+        store.save("cor", ci)
         audio.play(440 + ci * 220, 60)
     }
     if (input.just_pressed(Button.B)) {

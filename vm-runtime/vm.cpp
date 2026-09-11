@@ -149,7 +149,15 @@ VM::VM() {
         {"math.sin", std::sin}, {"math.cos", std::cos}, {"math.sqrt", std::sqrt}, {"math.abs", std::fabs}, {"math.floor", std::floor}};
     for (auto& m : math)
         addNative(m.first, [fn = m.second](Instance&, std::vector<Value>& a) { return Value(fn(argNum(a, 0))); });
+    addNative("math.min", [](Instance&, std::vector<Value>& a) { return Value(std::fmin(argNum(a, 0), argNum(a, 1))); });
+    addNative("math.max", [](Instance&, std::vector<Value>& a) { return Value(std::fmax(argNum(a, 0), argNum(a, 1))); });
     constants["math.pi"] = Value(3.14159265358979323846);
+    addNative("push", [](Instance&, std::vector<Value>& a) {  // push(array, value): appends in place
+        auto arr = a.size() == 2 ? std::get_if<std::shared_ptr<Array>>(&a[0]) : nullptr;
+        if (!arr) throw std::runtime_error("push() espera (array, valor)");
+        (*arr)->push_back(a[1]);
+        return Value();
+    });
 }
 
 void VM::addNative(const std::string& name, NativeFn fn) {
