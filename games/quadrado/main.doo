@@ -1,0 +1,45 @@
+object Quadrado
+
+// Prova de conceito: um quadrado que se move com o direcional.
+
+var x = 300
+var y = 220
+var speed = 240
+var colors = [0xFFCC00, 0x40E0D0, 0xFF5080]
+var ci = 0
+
+function create() {
+    print("quadrado: create")
+}
+
+function update() {
+    if (input.pressed(Button.Right)) { x += speed * time.delta }
+    if (input.pressed(Button.Left))  { x -= speed * time.delta }
+    if (input.pressed(Button.Down))  { y += speed * time.delta }
+    if (input.pressed(Button.Up))    { y -= speed * time.delta }
+    x = clamp(x, 0, 640 - 40)
+    y = clamp(y, 0, 480 - 40)
+
+    if (input.just_pressed(Button.A)) {
+        ci = (ci + 1) % len(colors)
+        audio.play(440 + ci * 220, 60)
+    }
+    if (input.just_pressed(Button.B)) {
+        destroy_self()
+    }
+
+    render.clear(0x101820)
+    render.rect(x, y, 40, 40, colors[ci])
+    render.text(20, 16, "Quadrado", 26, 0xFFFFFF)
+    render.text(20, 448, "Setas: mover    Z: cor    X: sair    Esc: HOME", 15, 0x8090A0)
+}
+
+function destroy() {
+    print("quadrado: destroy")
+}
+
+function clamp(v, lo, hi) {
+    if (v < lo) { return lo }
+    if (v > hi) { return hi }
+    return v
+}

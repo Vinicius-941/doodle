@@ -1,0 +1,90 @@
+object Firmware
+
+// Firmware do Doodle: um "jogo especial" com privilégios de sistema (system.*).
+// Estados: 0 = boot (logo), 1 = menu de jogos
+
+var state = 0
+var t = 0
+var chimed = false
+var games = []
+var selected = 0
+
+function create() {
+    games = store.installed()
+    audio.play(523, 150)
+}
+
+function update() {
+    t += time.delta
+    if (state == 0) {
+        boot()
+    } else {
+        menu()
+    }
+}
+
+function boot() {
+    render.clear(0x000000)
+    var k = t / 1.2
+    if (k > 1) {
+        k = 1
+        if (!chimed) {
+            audio.play(784, 250)
+            chimed = true
+        }
+    }
+    var c = rgb(255 * k, 255 * k, 255 * k)
+    centered(170, "DOODLE", 80, c)
+    centered(280, "entertainment system", 18, rgb(120 * k, 140 * k, 200 * k))
+    if (t > 2.8 || input.just_pressed(Button.A) || input.just_pressed(Button.Start)) {
+        state = 1
+    }
+}
+
+function menu() {
+    var n = len(games)
+    if (n > 0) {
+        if (input.just_pressed(Button.Down) && selected < n - 1) {
+            selected += 1
+            audio.play(660, 40)
+        }
+        if (input.just_pressed(Button.Up) && selected > 0) {
+            selected -= 1
+            audio.play(660, 40)
+        }
+        if (input.just_pressed(Button.A) || input.just_pressed(Button.Start)) {
+            audio.play(988, 120)
+            system.launch(games[selected])
+        }
+    }
+
+    // fundo em faixas, na linha do XMB
+    for (var i = 0; i < 12; i += 1) {
+        render.rect(0, i * 40, 640, 40, rgb(18 + i * 3, 28 + i * 4, 64 + i * 7))
+    }
+    render.text(40, 28, "Jogos", 30, 0xFFFFFF)
+    render.rect(40, 70, 560, 2, 0x8090C0)
+
+    if (n == 0) {
+        render.text(40, 200, "Nenhum jogo instalado em games/", 22, 0xC0C8E0)
+    }
+    for (var i = 0; i < n; i += 1) {
+        var id = games[i]
+        var y = 96 + i * 72
+        if (i == selected) {
+            render.rect(30, y - 6, 580, 64, 0x3A5FD0)
+        }
+        if (!render.image("games/" + id + "/icon.bmp", 40, y, 52, 52)) {
+            render.rect(40, y, 52, 52, 0x607090)
+        }
+        render.text(110, y + 2, id, 26, 0xFFFFFF)
+        if (store.get_save_data(id) == "") {
+            render.text(110, y + 32, "Sem dados salvos", 14, 0xA0B0D0)
+        }
+    }
+    render.text(40, 446, "Z: jogar     Setas: navegar     Esc: HOME", 15, 0xB0B8D0)
+}
+
+function centered(y, s, size, color) {
+    render.text((640 - render.text_width(s, size)) / 2, y, s, size, color)
+}
