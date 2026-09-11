@@ -1,10 +1,13 @@
 object Test3D
 
-// Fase de teste 3D: monta o cenário com spawn e desenha o HUD. A câmera vem do Player
-// (BasicCharacterController, prefab do SDK).
+// Fase de teste 3D: monta o cenário com spawn, cuida do dia/noite e desenha o HUD.
+// A câmera vem do Player (BasicCharacterController, prefab do SDK).
 
 var player
 var total = 0
+var noite = false   // Y: de noite, a lua fica fraca, a lâmpada da casa acende e o jogador ganha uma lanterna
+var ps1 = false     // X: shader "ps1" (vértices tremendo e textura afim, como no PS1 de verdade)
+var lampada
 
 function create() {
     block(vec3(0, -0.5, 0), vec3(80, 1, 80), 0x5E9E48, "")   // chão
@@ -39,6 +42,12 @@ function create() {
     fumaca.rate = 10
     fumaca.emitting = true
 
+    lampada = spawn(Light, vec3(-4.8, 1.8, 8))              // lâmpada na porta da casa (prefab Light, tipo Point)
+    lampada.color = 0xFFB060
+    lampada.range = 9
+    lampada.intensity = 1.5
+    lampada.enabled = false
+
     for (var i = 0; i < 6; i += 1) {                      // moedas em círculo
         var a = i * math.pi / 3 + 0.5
         coin(vec3(math.sin(a) * 9, 1, math.cos(a) * 9))
@@ -58,11 +67,36 @@ function coin(pos) {
     total += 1
 }
 
+function update() {
+    if (input.just_pressed(Button.Y)) {
+        noite = !noite
+        lampada.enabled = noite
+    }
+    if (input.just_pressed(Button.X)) {
+        ps1 = !ps1
+    }
+    if (ps1) {
+        render.set_shader("ps1")
+    }
+    if (noite) {   // luzes valem só para este quadro: declaradas de novo a cada update
+        render.ambient(0x141A28)
+        render.light_directional(vec3(0.4, -1, 0.3), 0x6070B0, 0.5)   // lua
+        render.light_spot(player.position + vec3(0, 0.6, 0), player.forward() + vec3(0, -0.3, 0), 0xFFF0D0, 18, 50, 1.4)  // lanterna
+    }
+}
+
 function draw() {
-    render.clear(0x7FB2E5)
+    if (noite) {
+        render.clear(0x0A0F1E)
+    } else {
+        render.clear(0x7FB2E5)
+    }
     render.text(20, 16, "Moedas: " + player.coins + " / " + total, 26, 0xFFFFFF)
     if (player.coins == total) {
         render.text(20, 50, "Você pegou todas!", 22, 0xFFE070)
     }
-    render.text(20, 448, "Setas: andar/girar    Z: pular    Esc: HOME", 15, 0xFFFFFF)
+    if (ps1) {
+        render.text(560, 16, "PS1", 22, 0xFFE070)
+    }
+    render.text(20, 448, "Setas: andar/girar   Z: pular   S: dia/noite   A: efeito PS1   Esc: HOME", 15, 0xFFFFFF)
 }

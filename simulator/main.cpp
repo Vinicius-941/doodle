@@ -68,11 +68,233 @@ struct Camera { Vec3 pos{0, 3, 8}, target{0, 0, 0}; double fov = 60; };
 static Camera cam;
 static int mode = -1;  // projection in use: 0 = 2D screen, 1 = 3D camera, -1 = must re-apply
 
+// ---------- shaders (GLSL 1.20 on the compatibility profile: the fixed-function state stays readable) ----------
+// opengl32.dll only exports GL 1.1; the driver hands out the GL 2.0 shader entry points.
+typedef char GLchar;
+#define GL_FRAGMENT_SHADER 0x8B30
+#define GL_VERTEX_SHADER 0x8B31
+#define GL_COMPILE_STATUS 0x8B81
+#define GL_LINK_STATUS 0x8B82
+#define GLFN(ret, name, args) typedef ret(APIENTRY* PFN_##name) args; static PFN_##name name;
+GLFN(GLuint, glCreateShader, (GLenum))
+GLFN(void, glShaderSource, (GLuint, GLsizei, const GLchar* const*, const GLint*))
+GLFN(void, glCompileShader, (GLuint))
+GLFN(void, glGetShaderiv, (GLuint, GLenum, GLint*))
+GLFN(void, glGetShaderInfoLog, (GLuint, GLsizei, GLsizei*, GLchar*))
+GLFN(GLuint, glCreateProgram, ())
+GLFN(void, glAttachShader, (GLuint, GLuint))
+GLFN(void, glLinkProgram, (GLuint))
+GLFN(void, glGetProgramiv, (GLuint, GLenum, GLint*))
+GLFN(void, glGetProgramInfoLog, (GLuint, GLsizei, GLsizei*, GLchar*))
+GLFN(void, glUseProgram, (GLuint))
+GLFN(GLint, glGetUniformLocation, (GLuint, const GLchar*))
+GLFN(void, glUniform1i, (GLint, GLint))
+GLFN(void, glUniform1f, (GLint, GLfloat))
+GLFN(void, glUniform2f, (GLint, GLfloat, GLfloat))
+GLFN(void, glUniform1fv, (GLint, GLsizei, const GLfloat*))
+
+static bool loadShaderApi() {
+#define LOAD(name) if (!(name = (PFN_##name)wglGetProcAddress(#name))) return false;
+    LOAD(glCreateShader) LOAD(glShaderSource) LOAD(glCompileShader) LOAD(glGetShaderiv) LOAD(glGetShaderInfoLog)
+    LOAD(glCreateProgram) LOAD(glAttachShader) LOAD(glLinkProgram) LOAD(glGetProgramiv) LOAD(glGetProgramInfoLog)
+    LOAD(glUseProgram) LOAD(glGetUniformLocation) LOAD(glUniform1i) LOAD(glUniform1f) LOAD(glUniform2f) LOAD(glUniform1fv)
+#undef LOAD
+    return true;
+}
+
+// Prepended to every shader, built-in or a game's own (which must not declare #version).
+static const char* shaderHeader = R"(#version 120
+uniform int lightCount;       // lights of this frame, in gl_LightSource[0..7] (eye space)
+uniform float lightRange[8];  // point/spot: fades to zero at this distance
+uniform sampler2D tex;
+uniform int useTexture;
+uniform float time;           // seconds since the console started
+uniform vec2 snapGrid;        // PS1 shader: the resolution vertices snap to
+varying vec3 vPos;            // eye space
+varying vec3 vNormal;         // eye space
+varying vec4 vColor;
+varying vec2 vUV;
+
+vec3 lighting(vec3 p, vec3 n) {  // ambient + diffuse of every light, at eye-space point p with normal n
+    vec3 sum = gl_LightModel.ambient.rgb;
+    for (int i = 0; i < 8; i++) {
+        if (i >= lightCount) break;
+        vec4 lp = gl_LightSource[i].position;
+        vec3 l = lp.xyz - p * lp.w;  // directional lights have w = 0
+        float d = length(l);
+        l /= max(d, 0.0001);
+        float att = 1.0;
+        if (lp.w != 0.0) {
+            float x = d / lightRange[i];
+            att = clamp(1.0 - x * x, 0.0, 1.0);
+            att *= att;
+            float cutoff = gl_LightSource[i].spotCosCutoff;  // -1 for non-spot lights
+            if (cutoff >= 0.0) att *= smoothstep(cutoff, mix(cutoff, 1.0, 0.25), dot(-l, normalize(gl_LightSource[i].spotDirection)));
+        }
+        sum += gl_LightSource[i].diffuse.rgb * max(dot(n, l), 0.0) * att;
+    }
+    return sum;
+}
+)";
+
+static const char* defaultVert = R"(
+void main() {
+    vec4 eye = gl_ModelViewMatrix * gl_Vertex;
+    vPos = eye.xyz;
+    vNormal = gl_NormalMatrix * gl_Normal;
+    vColor = gl_Color;
+    vUV = gl_MultiTexCoord0.xy;
+    gl_Position = gl_ProjectionMatrix * eye;
+}
+)";
+
+static const char* defaultFrag = R"(
+void main() {  // per-pixel lighting
+    vec4 c = vColor;
+    if (useTexture != 0) c *= texture2D(tex, vUV);
+    if (c.a < 0.01) discard;  // transparent texels (magenta keyed)
+    gl_FragColor = vec4(c.rgb * lighting(vPos, normalize(vNormal)), c.a);
+}
+)";
+
+// The PS1 look as a choice: vertices snap to a low-res grid (wobble), textures are mapped affinely (swim),
+// and lighting is per vertex (Gouraud).
+static const char* ps1Vert = R"(
+varying vec3 vUVw;  // uv * w and w: dividing per pixel undoes perspective correction
+void main() {
+    vec4 eye = gl_ModelViewMatrix * gl_Vertex;
+    vec4 clip = gl_ProjectionMatrix * eye;
+    if (clip.w > 0.0) {
+        vec2 px = floor((clip.xy / clip.w * 0.5 + 0.5) * snapGrid + 0.5);
+        clip.xy = (px / snapGrid * 2.0 - 1.0) * clip.w;
+    }
+    gl_Position = clip;
+    vColor = vec4(gl_Color.rgb * lighting(eye.xyz, normalize(gl_NormalMatrix * gl_Normal)), gl_Color.a);
+    vUVw = vec3(gl_MultiTexCoord0.xy * clip.w, clip.w);
+}
+)";
+
+static const char* ps1Frag = R"(
+varying vec3 vUVw;
+void main() {
+    vec4 c = vColor;
+    if (useTexture != 0) c *= texture2D(tex, vUVw.xy / vUVw.z);
+    if (c.a < 0.01) discard;
+    gl_FragColor = c;
+}
+)";
+
+struct Shader {
+    GLuint prog = 0;
+    GLint lightCount = -1, lightRange = -1, tex = -1, useTexture = -1, time = -1, snapGrid = -1;
+};
+static bool shadersOk;                    // false: fixed-function fallback (lights per vertex, set_shader ignored)
+static std::map<std::string, Shader> shaders;
+static const Shader* shader;              // for this frame's 3D; reset to "padrao" every frame
+static double elapsed;                    // for the `time` uniform
+
+static Shader buildShader(const std::string& name, const std::string& vert, const std::string& frag) {
+    auto stage = [&](GLenum type, const std::string& body) {
+        std::string src = shaderHeader + body;
+        const GLchar* p = src.c_str();
+        GLuint s = glCreateShader(type);
+        glShaderSource(s, 1, &p, nullptr);
+        glCompileShader(s);
+        GLint ok = 0;
+        glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+        if (!ok) {
+            char log[2048] = "";
+            glGetShaderInfoLog(s, sizeof log, nullptr, log);
+            throw std::runtime_error("shader " + name + (type == GL_VERTEX_SHADER ? " (.vert): " : " (.frag): ") + log);
+        }
+        return s;
+    };
+    Shader sh;
+    sh.prog = glCreateProgram();
+    glAttachShader(sh.prog, stage(GL_VERTEX_SHADER, vert));
+    glAttachShader(sh.prog, stage(GL_FRAGMENT_SHADER, frag));
+    glLinkProgram(sh.prog);
+    GLint ok = 0;
+    glGetProgramiv(sh.prog, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[2048] = "";
+        glGetProgramInfoLog(sh.prog, sizeof log, nullptr, log);
+        throw std::runtime_error("shader " + name + ": " + log);
+    }
+    sh.lightCount = glGetUniformLocation(sh.prog, "lightCount");
+    sh.lightRange = glGetUniformLocation(sh.prog, "lightRange");
+    sh.tex = glGetUniformLocation(sh.prog, "tex");
+    sh.useTexture = glGetUniformLocation(sh.prog, "useTexture");
+    sh.time = glGetUniformLocation(sh.prog, "time");
+    sh.snapGrid = glGetUniformLocation(sh.prog, "snapGrid");
+    return sh;
+}
+
+// ---------- lights: declared every frame (update phase), applied when 3D drawing starts ----------
+
+enum LightType { LIGHT_DIRECTIONAL, LIGHT_POINT, LIGHT_SPOT };
+struct LightDef {
+    int type;
+    Vec3 pos, dir, color;  // color already multiplied by intensity
+    double range = 0, angle = 0;
+};
+static const Vec3 defaultAmbient{0.35, 0.35, 0.4};
+static std::vector<LightDef> lights;  // max 8 (GL_MAX_LIGHTS); none = a default sun
+static Vec3 ambient = defaultAmbient;
+
+static void beginFrameLighting() {
+    lights.clear();
+    ambient = defaultAmbient;
+    shader = shadersOk ? &shaders["padrao"] : nullptr;
+    mode = -1;
+}
+
+static void applyLights() {  // needs the view matrix on the modelview stack: GL stores light positions in eye space
+    std::vector<LightDef> ls = lights;
+    if (ls.empty()) ls.push_back({LIGHT_DIRECTIONAL, {}, {0.5, -1, 0.7}, {1, 1, 1}});  // default sun
+    GLfloat range[8] = {};
+    for (int i = 0; i < 8; i++) {
+        GLenum id = GL_LIGHT0 + i;
+        if (i >= (int)ls.size()) {
+            glDisable(id);
+            continue;
+        }
+        const LightDef& l = ls[i];
+        glEnable(id);
+        GLfloat pos[4] = {(GLfloat)l.pos.x, (GLfloat)l.pos.y, (GLfloat)l.pos.z, 1};
+        if (l.type == LIGHT_DIRECTIONAL) {  // GL wants the direction *to* the light
+            pos[0] = (GLfloat)-l.dir.x; pos[1] = (GLfloat)-l.dir.y; pos[2] = (GLfloat)-l.dir.z; pos[3] = 0;
+        }
+        GLfloat diffuse[4] = {(GLfloat)l.color.x, (GLfloat)l.color.y, (GLfloat)l.color.z, 1}, black[4] = {0, 0, 0, 1};
+        GLfloat dir[3] = {(GLfloat)l.dir.x, (GLfloat)l.dir.y, (GLfloat)l.dir.z};
+        glLightfv(id, GL_POSITION, pos);
+        glLightfv(id, GL_DIFFUSE, diffuse);
+        glLightfv(id, GL_AMBIENT, black);
+        glLightfv(id, GL_SPECULAR, black);
+        glLightfv(id, GL_SPOT_DIRECTION, dir);
+        glLightf(id, GL_SPOT_CUTOFF, l.type == LIGHT_SPOT ? (GLfloat)std::clamp(l.angle / 2, 1.0, 90.0) : 180.0f);
+        glLightf(id, GL_SPOT_EXPONENT, l.type == LIGHT_SPOT ? 8.0f : 0.0f);
+        glLightf(id, GL_CONSTANT_ATTENUATION, 1);  // fixed-function fallback only: roughly fades out by `range`
+        glLightf(id, GL_QUADRATIC_ATTENUATION, l.type == LIGHT_DIRECTIONAL ? 0.0f : GLfloat(25 / std::max(0.01, l.range * l.range)));
+        range[i] = (GLfloat)std::max(0.01, l.range);
+    }
+    GLfloat amb[4] = {(GLfloat)ambient.x, (GLfloat)ambient.y, (GLfloat)ambient.z, 1};
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, amb);
+    if (!shader) return;
+    glUseProgram(shader->prog);
+    glUniform1i(shader->lightCount, (GLint)std::min<size_t>(ls.size(), 8));
+    glUniform1fv(shader->lightRange, 8, range);
+    glUniform1i(shader->tex, 0);
+    glUniform1f(shader->time, (GLfloat)elapsed);
+    glUniform2f(shader->snapGrid, 320, 240);
+}
+
 // Every draw call picks its projection, so games can mix 3D scenes and a 2D HUD freely.
 // 2D always draws and writes the nearest depth, so it stays on top of 3D drawn later in the frame (HUD).
 static void mode2D() {
     if (mode == 0) return;
     mode = 0;
+    if (shadersOk) glUseProgram(0);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_ALWAYS);
     glDisable(GL_LIGHTING);
@@ -95,9 +317,7 @@ static void mode3D() {
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     gluLookAt(cam.pos.x, cam.pos.y, cam.pos.z, cam.target.x, cam.target.y, cam.target.z, 0, 1, 0);
-    // ponytail: one fixed directional "sun"; Light (Point/Directional/Spot) from doc §5 needs a render.light API
-    static const GLfloat sun[] = {-0.5f, 1.0f, -0.7f, 0.0f};  // w = 0: directional, fixed in world space
-    glLightfv(GL_LIGHT0, GL_POSITION, sun);
+    applyLights();
 }
 
 // Unity-style primitives at unit size: Cube 1, Sphere Ø1, Cylinder and Capsule Ø1 x 2 tall, Plane 1x1 facing up.
@@ -175,6 +395,11 @@ static void buildMeshes() {
     glEndList();
 
     gluDeleteQuadric(q);
+}
+
+static Vec3 rgb01(double c) {  // 0xRRGGBB -> components in 0..1
+    int v = (int)c;
+    return {(v >> 16 & 255) / 255.0, (v >> 8 & 255) / 255.0, (v & 255) / 255.0};
 }
 
 static void setColor(double c, double alpha = 1) {
@@ -530,8 +755,9 @@ static const Model& model(const fs::path& p) {
     return models[p] = std::move(m);
 }
 
-static void drawPart(GLuint list, GLuint tex, Vec3 rgb) {  // lit color x texture (GL_MODULATE)
+static void drawPart(GLuint list, GLuint tex, Vec3 rgb) {  // lit color x texture (GL_MODULATE / the shader)
     glColor3d(rgb.x, rgb.y, rgb.z);
+    if (shader) glUniform1i(shader->useTexture, tex ? 1 : 0);
     if (tex) {
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, tex);
@@ -547,6 +773,9 @@ static double opt(Args& a, size_t i, double fallback) { return i < a.size() ? ar
 static void registerSdk() {
     for (int i = 0; i < NBUTTONS; i++) vm.constants["Button." + std::string(buttonNames[i])] = Value(double(i));
     for (int i = 0; i < NMESHES; i++) vm.constants["Mesh." + std::string(meshNames[i])] = Value(double(i));
+    vm.constants["Light.Directional"] = Value(double(LIGHT_DIRECTIONAL));
+    vm.constants["Light.Point"] = Value(double(LIGHT_POINT));
+    vm.constants["Light.Spot"] = Value(double(LIGHT_SPOT));
     registerPhysics(vm);
 
     vm.addNative("spawn", [](Instance&, Args& a) {  // (Object, position?) -> ref to the new instance
@@ -614,6 +843,49 @@ static void registerSdk() {
         mode = -1;
         return Value();
     });
+    // Lights of this frame (declare them in update, every frame): max 8; with none, a default sun lights the scene.
+    auto light = [](LightDef l, double intensity) {
+        if (lights.size() >= 8) return Value(false);  // ponytail: 8 per frame, like GL's fixed lights; cull by distance if games need more
+        l.color = l.color * intensity;
+        lights.push_back(l);
+        mode = -1;
+        return Value(true);
+    };
+    vm.addNative("render.light_directional", [light](Instance&, Args& a) {  // (direction, color, intensity = 1)
+        return light({LIGHT_DIRECTIONAL, {}, argVec(a, 0), rgb01(argNum(a, 1))}, opt(a, 2, 1));
+    });
+    vm.addNative("render.light_point", [light](Instance&, Args& a) {  // (position, color, range, intensity = 1)
+        return light({LIGHT_POINT, argVec(a, 0), {}, rgb01(argNum(a, 1)), argNum(a, 2)}, opt(a, 3, 1));
+    });
+    vm.addNative("render.light_spot", [light](Instance&, Args& a) {  // (position, direction, color, range, angle = 45, intensity = 1)
+        return light({LIGHT_SPOT, argVec(a, 0), argVec(a, 1), rgb01(argNum(a, 2)), argNum(a, 3), opt(a, 4, 45)}, opt(a, 5, 1));
+    });
+    vm.addNative("render.ambient", [](Instance&, Args& a) {  // (color) light everywhere, even in shadow
+        ambient = rgb01(argNum(a, 0));
+        mode = -1;
+        return Value();
+    });
+    // ("padrao" | "ps1" | "name") for this frame's 3D; "name" = name.vert and/or name.frag in the game folder
+    vm.addNative("render.set_shader", [](Instance&, Args& a) {
+        if (!shadersOk) return Value(false);
+        std::string name = str(a, 0);
+        std::string key = name == "padrao" || name == "ps1" ? name : (active->base / fs::u8path(name)).u8string();
+        auto it = shaders.find(key);
+        if (it == shaders.end()) {
+            auto stage = [&](const char* ext, const char* fallback) {
+                std::error_code ec;
+                fs::path p = active->base / fs::u8path(name + ext);
+                return fs::exists(p, ec) ? readFile(p) : std::string(fallback);
+            };
+            std::string vert = stage(".vert", defaultVert), frag = stage(".frag", defaultFrag);
+            if (vert == defaultVert && frag == defaultFrag) throw std::runtime_error("shader não encontrado: " + name + ".vert/.frag");
+            it = shaders.emplace(key, buildShader(name, vert, frag)).first;
+        }
+        shader = &it->second;
+        mode = -1;
+        return Value(true);
+    });
+
     // (Mesh.X or "model.obj", position, rotation in degrees, scale, color, texture = "")
     // color tints: 0xFFFFFF keeps a model's own colors/textures. texture (optional) replaces the material's.
     vm.addNative("render.mesh", [](Instance&, Args& a) {
@@ -632,8 +904,7 @@ static void registerSdk() {
         } else {
             s = argVec(a, 3);
         }
-        int c = (int)argNum(a, 4);
-        Vec3 tint{(c >> 16 & 255) / 255.0, (c >> 8 & 255) / 255.0, (c & 255) / 255.0};
+        Vec3 tint = rgb01(argNum(a, 4));
         GLuint tex = a.size() > 5 && !str(a, 5).empty() ? texture(active->base / fs::u8path(str(a, 5))) : 0;
         mode3D();
         glPushMatrix();
@@ -863,13 +1134,21 @@ int main(int argc, char** argv) {
     // ponytail: frame pacing relies on vsync; add a sleep-based limiter if some driver ignores it
     if (auto swapInterval = (BOOL(WINAPI*)(int))wglGetProcAddress("wglSwapIntervalEXT")) swapInterval(1);
 
-    glEnable(GL_LIGHT0);
     glEnable(GL_COLOR_MATERIAL);  // render.mesh color drives the lit material
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
-    glEnable(GL_NORMALIZE);       // keep lighting right on scaled meshes
-    const GLfloat ambient[] = {0.35f, 0.35f, 0.4f, 1};
-    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
+    glEnable(GL_NORMALIZE);       // keep lighting right on scaled meshes (fixed-function fallback)
     buildMeshes();
+    shadersOk = loadShaderApi();
+    try {
+        if (shadersOk) {
+            shaders["padrao"] = buildShader("padrao", defaultVert, defaultFrag);
+            shaders["ps1"] = buildShader("ps1", ps1Vert, ps1Frag);
+        }
+    } catch (const std::exception& e) {
+        fprintf(stderr, "%s\n", e.what());
+        shadersOk = false;
+    }
+    if (!shadersOk) fprintf(stderr, "aviso: sem shaders no driver; iluminação por vértice e render.set_shader desligado\n");
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     SelectObject(dc, CreateFontW(-64, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -905,6 +1184,8 @@ int main(int argc, char** argv) {
         glScissor(vx, vy, vw, vh);
         glEnable(GL_SCISSOR_TEST);
         pollInput();
+        elapsed += dt;
+        beginFrameLighting();
         frame();
         updateAudio();
         SwapBuffers(dc);
