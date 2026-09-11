@@ -1,0 +1,9 @@
+newmtl side
+Kd 1 1 1
+map_Kd grass-side.bmp
+newmtl top
+Kd 1 1 1
+map_Kd grass.bmp
+newmtl bottom
+Kd 1 1 1
+map_Kd dirt.bmp
