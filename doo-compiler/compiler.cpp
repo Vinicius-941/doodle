@@ -166,7 +166,8 @@ struct Parser {
         P e = expr();
         for (const char* op : {"=", "+=", "-=", "*=", "/="}) {
             if (!accept(op)) continue;
-            if (e->kind != K::Name && e->kind != K::Index) throw err("só dá pra atribuir a uma variável ou elemento de array");
+            if (e->kind != K::Name && e->kind != K::Index && e->kind != K::Member)
+                throw err("só dá pra atribuir a variável, elemento de array ou v.x/.y/.z");
             auto n = node(K::Assign, op);
             n->kids.push_back(std::move(e));
             n->kids.push_back(expr());
@@ -369,12 +370,20 @@ struct Codegen {
     void assign(Node* n) {
         Node* target = n->kids[0].get();
         std::string op = n->text.substr(0, n->text.size() - 1);  // "+=" -> "+", "=" -> ""
+        if (target->kind == K::Member) {  // v.x = e: rebuild the vec3, then store it back into v
+            if (target->kids[0]->kind != K::Name) throw err("só dá pra alterar .x/.y/.z de uma variável");
+            expr(target->kids[0].get());
+        }
         if (target->kind == K::Index) { expr(target->kids[0].get()); expr(target->kids[1].get()); }
         if (!op.empty()) expr(target);  // current value (a[i] is evaluated again: fine for plain expressions)
         expr(n->kids[1].get());
         line = n->line;
         if (!op.empty()) emit(binop(op));
         if (target->kind == K::Index) return emit(OP_SET_INDEX);
+        if (target->kind == K::Member) {
+            emit(OP_SET_MEMBER, component(target));
+            target = target->kids[0].get();
+        }
         int s = local(target->text);
         if (s >= 0) return emit(OP_SET_LOCAL, s);
         s = field(target->text);
@@ -387,6 +396,11 @@ struct Codegen {
         Node* base = m->kids[0].get();
         if (base->kind != K::Name || local(base->text) >= 0 || field(base->text) >= 0) return {};
         return base->text + "." + m->text;
+    }
+
+    int component(Node* m) const {
+        if (m->text == "x" || m->text == "y" || m->text == "z") return m->text[0] - 'x';
+        throw err("'." + m->text + "' não existe (vec3 tem .x, .y, .z)");
     }
 
     void native(const std::string& name, int argc) {
@@ -425,12 +439,17 @@ struct Codegen {
             if (s >= 0) { emit(OP_GET_FIELD, s); break; }
             throw err("'" + n->text + "' não foi declarada");
         }
-        case K::Member: {  // Button.A (constant) or time.delta (SDK property = zero-arg native)
+        case K::Member: {
             std::string q = qualified(n);
-            if (q.empty()) throw err("'.' só vale para nomes do SDK, como time.delta ou Button.A");
-            auto c = vm.constants.find(q);
+            if (q.empty()) {  // value.x / .y / .z
+                expr(n->kids[0].get());
+                emit(OP_GET_MEMBER, component(n));
+                break;
+            }
+            auto c = vm.constants.find(q);  // Button.A (constant) or time.delta (SDK property = zero-arg native)
             if (c != vm.constants.end()) emit(OP_CONST, constant(c->second));
-            else native(q, 0);
+            else if (vm.nativeIndex.count(q)) native(q, 0);
+            else throw err("'" + q + "' não existe");
             break;
         }
         case K::Index: expr(n->kids[0].get()); expr(n->kids[1].get()); emit(OP_INDEX); break;

@@ -14,7 +14,7 @@ target_include_directories(doo PUBLIC doo-compiler vm-runtime)
 # Simulator: virtual Doodle hardware on Windows. Reads firmware/ and games/ from the source tree,
 # so editing a .doo only needs a relaunch from the menu, not a rebuild.
 add_executable(doodle simulator/main.cpp)
-target_link_libraries(doodle PRIVATE doo opengl32 winmm xinput)
+target_link_libraries(doodle PRIVATE doo opengl32 glu32 winmm xinput)
 target_compile_definitions(doodle PRIVATE DOODLE_ROOT="${CMAKE_SOURCE_DIR}" UNICODE _UNICODE NOMINMAX)
 
 enable_testing()

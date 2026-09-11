@@ -39,6 +39,17 @@ function explode() {
 }
 
 function strings() { return "n=" + n + " " + len([1, 2]) + " " + (2 % 3 - 0.5) }
+
+var pos = vec3(1, 2, 3)
+
+function vectors() {
+    pos.y += 10                        // component write-back into a field
+    var v = pos + vec3(1, 1, 1) * 2
+    v.x = -v.x / 3
+    return v
+}
+
+function mathy() { return math.floor(math.sqrt(16.5)) + math.abs(-1) }
 )";
 
 static bool throws(const char* code, const VM& vm, const char* expectedPrefix) {
@@ -57,6 +68,9 @@ int main() {
     CHECK(std::get<double>(vm.call(*t, "loops")) == 103);
     CHECK(std::get<bool>(vm.call(*t, "logic")) == true);
     CHECK(std::get<std::string>(vm.call(*t, "strings")) == "n=55 2 1.5");
+    CHECK((std::get<Vec3>(vm.call(*t, "vectors")) == Vec3{-1, 14, 5}));
+    CHECK((std::get<Vec3>(t->fields[2]) == Vec3{1, 12, 3}));
+    CHECK(std::get<double>(vm.call(*t, "mathy")) == 5);
 
     try { vm.call(*t, "explode"); CHECK(false); }
     catch (const DooError& e) { CHECK(std::string(e.what()).rfind("t.doo:32:", 0) == 0); }  // runtime errors carry file:line
@@ -64,6 +78,7 @@ int main() {
     CHECK(throws("object X\nfunction f() {\n y = 1 }", vm, "x.doo:3:"));                  // undeclared variable
     CHECK(throws("object X\nfunction f() { g(1) }\nfunction g() {}", vm, "x.doo:2:"));    // wrong arity
     CHECK(throws("object X\nfunction f() { system.launch(\"a\") }", vm, "x.doo:2:"));     // firmware-only API
+    CHECK(throws("object X\nfunction f() { var v = vec3()\n return v.w }", vm, "x.doo:3:")); // vec3 has only x/y/z
     CHECK(compile("object X\nfunction f() { system.launch(\"a\") }", "fw.doo", vm, true)); // ...allowed when privileged
 
     puts("doo_test: ok");

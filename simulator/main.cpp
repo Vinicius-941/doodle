@@ -11,6 +11,7 @@
 #include <mmsystem.h>
 #include <Xinput.h>
 #include <GL/gl.h>
+#include <GL/glu.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -51,7 +52,107 @@ static GLYPHMETRICSFLOAT glyphs[256];
 
 static bool justPressed(int b) { return held[b] && !was[b]; }
 
-// ---------- render ----------
+// ---------- render: 2D screen / 3D camera ----------
+
+struct Camera { Vec3 pos{0, 3, 8}, target{0, 0, 0}; double fov = 60; };
+static Camera cam;
+static int mode = -1;  // projection in use: 0 = 2D screen, 1 = 3D camera, -1 = must re-apply
+
+// Every draw call picks its projection, so games can mix 3D scenes and a 2D HUD freely.
+static void mode2D() {
+    if (mode == 0) return;
+    mode = 0;
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_LIGHTING);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, W, H, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+}
+
+static void mode3D() {
+    if (mode == 1) return;
+    mode = 1;
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluPerspective(cam.fov, double(W) / H, 0.1, 500);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    gluLookAt(cam.pos.x, cam.pos.y, cam.pos.z, cam.target.x, cam.target.y, cam.target.z, 0, 1, 0);
+    // ponytail: one fixed directional "sun"; Light (Point/Directional/Spot) from doc §5 needs a render.light API
+    static const GLfloat sun[] = {-0.5f, 1.0f, -0.7f, 0.0f};  // w = 0: directional, fixed in world space
+    glLightfv(GL_LIGHT0, GL_POSITION, sun);
+}
+
+// Unity-style primitives at unit size: Cube 1, Sphere Ø1, Cylinder and Capsule Ø1 x 2 tall, Plane 1x1 facing up.
+enum Mesh { MESH_CUBE, MESH_SPHERE, MESH_CYLINDER, MESH_CAPSULE, MESH_PLANE, NMESHES };
+static const char* meshNames[NMESHES] = {"Cube", "Sphere", "Cylinder", "Capsule", "Plane"};
+static GLuint meshBase;
+
+static void buildMeshes() {
+    GLUquadric* q = gluNewQuadric();
+    meshBase = glGenLists(NMESHES);
+
+    glNewList(meshBase + MESH_CUBE, GL_COMPILE);
+    glBegin(GL_QUADS);
+    for (int axis = 0; axis < 3; axis++) {
+        for (int side = -1; side <= 1; side += 2) {  // one face per axis direction
+            double n[3] = {};
+            n[axis] = side;
+            glNormal3dv(n);
+            static const int corners[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+            for (auto& c : corners) {
+                double p[3];
+                p[axis] = 0.5 * side;
+                p[(axis + 1) % 3] = 0.5 * c[0];
+                p[(axis + 2) % 3] = 0.5 * c[1];
+                glVertex3dv(p);
+            }
+        }
+    }
+    glEnd();
+    glEndList();
+
+    glNewList(meshBase + MESH_SPHERE, GL_COMPILE);
+    gluSphere(q, 0.5, 24, 16);
+    glEndList();
+
+    glNewList(meshBase + MESH_CYLINDER, GL_COMPILE);  // GLU builds along +Z; rotate it to stand on Y
+    glPushMatrix();
+    glRotated(-90, 1, 0, 0);
+    glTranslated(0, 0, -1);
+    gluCylinder(q, 0.5, 0.5, 2, 24, 1);
+    gluQuadricOrientation(q, GLU_INSIDE);  // bottom cap faces down
+    gluDisk(q, 0, 0.5, 24, 1);
+    gluQuadricOrientation(q, GLU_OUTSIDE);
+    glTranslated(0, 0, 2);
+    gluDisk(q, 0, 0.5, 24, 1);
+    glPopMatrix();
+    glEndList();
+
+    glNewList(meshBase + MESH_CAPSULE, GL_COMPILE);  // cylinder 1 tall + a sphere on each end
+    glPushMatrix();
+    glRotated(-90, 1, 0, 0);
+    glTranslated(0, 0, -0.5);
+    gluCylinder(q, 0.5, 0.5, 1, 24, 1);
+    gluSphere(q, 0.5, 24, 16);
+    glTranslated(0, 0, 1);
+    gluSphere(q, 0.5, 24, 16);
+    glPopMatrix();
+    glEndList();
+
+    glNewList(meshBase + MESH_PLANE, GL_COMPILE);
+    glBegin(GL_QUADS);
+    glNormal3d(0, 1, 0);
+    glVertex3d(-0.5, 0, -0.5); glVertex3d(-0.5, 0, 0.5); glVertex3d(0.5, 0, 0.5); glVertex3d(0.5, 0, -0.5);
+    glEnd();
+    glEndList();
+
+    gluDeleteQuadric(q);
+}
 
 static void setColor(double c) {
     int v = (int)c;
@@ -59,6 +160,7 @@ static void setColor(double c) {
 }
 
 static void rect(double x, double y, double w, double h, double c) {
+    mode2D();
     setColor(c);
     glBegin(GL_QUADS);
     glVertex2d(x, y); glVertex2d(x + w, y); glVertex2d(x + w, y + h); glVertex2d(x, y + h);
@@ -73,6 +175,7 @@ static std::wstring widen(const std::string& s) {
 }
 
 static void textW(double x, double y, const std::wstring& s, double size, double c) {
+    mode2D();
     setColor(c);
     glPushMatrix();
     glTranslated(x, y + size * 0.8, 0);  // y = top of the text; glyph outlines sit on the baseline
@@ -189,6 +292,8 @@ static void load(Program& prog, const fs::path& base, const std::string& file, b
     prog.inst.reset();
     prog.base = base;
     active = &prog;
+    cam = {};  // each program starts with the default camera
+    mode = -1;
     prog.inst = vm.instantiate(compile(readFile(root / fs::u8path(file)), file, vm, privileged));
 }
 
@@ -213,44 +318,40 @@ static void guarded(void (*fn)()) {
 
 // ---------- SDK ----------
 
-static double num(Args& a, size_t i) {
-    if (i >= a.size() || !std::holds_alternative<double>(a[i]))
-        throw std::runtime_error("argumento " + std::to_string(i + 1) + " deve ser um número");
-    return std::get<double>(a[i]);
-}
-
 static std::string str(Args& a, size_t i) {
     if (i >= a.size()) throw std::runtime_error("faltou o argumento " + std::to_string(i + 1));
     return toString(a[i]);
 }
 
 static int button(Args& a) {
-    int b = (int)num(a, 0);
+    int b = (int)argNum(a, 0);
     if (b < 0 || b >= NBUTTONS) throw std::runtime_error("botão inválido");
     return b;
 }
 
 static void registerSdk() {
     for (int i = 0; i < NBUTTONS; i++) vm.constants["Button." + std::string(buttonNames[i])] = Value(double(i));
+    for (int i = 0; i < NMESHES; i++) vm.constants["Mesh." + std::string(meshNames[i])] = Value(double(i));
 
     vm.addNative("rgb", [](Instance&, Args& a) {
-        auto c = [&](size_t i) { return std::clamp((int)num(a, i), 0, 255); };
+        auto c = [&](size_t i) { return std::clamp((int)argNum(a, i), 0, 255); };
         return Value(double(c(0) << 16 | c(1) << 8 | c(2)));
     });
-    vm.addNative("render.clear", [](Instance&, Args& a) { rect(0, 0, W, H, num(a, 0)); return Value(); });
+    vm.addNative("render.clear", [](Instance&, Args& a) { rect(0, 0, W, H, argNum(a, 0)); return Value(); });
     vm.addNative("render.rect", [](Instance&, Args& a) {
-        rect(num(a, 0), num(a, 1), num(a, 2), num(a, 3), num(a, 4));
+        rect(argNum(a, 0), argNum(a, 1), argNum(a, 2), argNum(a, 3), argNum(a, 4));
         return Value();
     });
     vm.addNative("render.text", [](Instance&, Args& a) {
-        text(num(a, 0), num(a, 1), str(a, 2), num(a, 3), num(a, 4));
+        text(argNum(a, 0), argNum(a, 1), str(a, 2), argNum(a, 3), argNum(a, 4));
         return Value();
     });
-    vm.addNative("render.text_width", [](Instance&, Args& a) { return Value(textWidth(str(a, 0), num(a, 1))); });
+    vm.addNative("render.text_width", [](Instance&, Args& a) { return Value(textWidth(str(a, 0), argNum(a, 1))); });
     vm.addNative("render.image", [](Instance&, Args& a) {  // (path, x, y, w, h) -> false if the file is missing
         const Image& img = image(active->base / fs::u8path(str(a, 0)));
         if (!img.tex) return Value(false);
-        double x = num(a, 1), y = num(a, 2), w = num(a, 3), h = num(a, 4);
+        double x = argNum(a, 1), y = argNum(a, 2), w = argNum(a, 3), h = argNum(a, 4);
+        mode2D();
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, img.tex);
         glColor3ub(255, 255, 255);
@@ -264,10 +365,39 @@ static void registerSdk() {
         return Value(true);
     });
 
+    // ponytail: perspective only; add an orthographic variant when a game needs it
+    vm.addNative("render.camera", [](Instance&, Args& a) {  // (position, target, fov = 60)
+        cam = {argVec(a, 0), argVec(a, 1), a.size() > 2 ? argNum(a, 2) : 60};
+        mode = -1;
+        return Value();
+    });
+    vm.addNative("render.mesh", [](Instance&, Args& a) {  // (Mesh.X, position, rotation in degrees, scale, color)
+        int m = (int)argNum(a, 0);
+        if (m < 0 || m >= NMESHES) throw std::runtime_error("mesh inválida");
+        Vec3 p = argVec(a, 1), r = argVec(a, 2), s;
+        if (a.size() > 3 && std::holds_alternative<double>(a[3])) {  // a number = uniform scale
+            double k = argNum(a, 3);
+            s = {k, k, k};
+        } else {
+            s = argVec(a, 3);
+        }
+        mode3D();
+        setColor(argNum(a, 4));
+        glPushMatrix();
+        glTranslated(p.x, p.y, p.z);
+        glRotated(r.y, 0, 1, 0);  // Unity order: Z, then X, then Y
+        glRotated(r.x, 1, 0, 0);
+        glRotated(r.z, 0, 0, 1);
+        glScaled(s.x, s.y, s.z);
+        glCallList(meshBase + m);
+        glPopMatrix();
+        return Value();
+    });
+
     vm.addNative("input.pressed", [](Instance&, Args& a) { return Value(held[button(a)]); });  // held down
     vm.addNative("input.just_pressed", [](Instance&, Args& a) { return Value(justPressed(button(a))); });
 
-    vm.addNative("audio.play", [](Instance&, Args& a) { tone(num(a, 0), num(a, 1)); return Value(); });  // (Hz, ms)
+    vm.addNative("audio.play", [](Instance&, Args& a) { tone(argNum(a, 0), argNum(a, 1)); return Value(); });  // (Hz, ms)
     vm.addNative("audio.stop", [](Instance&, Args&) { PlaySoundW(nullptr, nullptr, 0); return Value(); });
 
     vm.addNative("time.delta", [](Instance&, Args&) { return Value(dt); });
@@ -369,14 +499,19 @@ int main(int argc, char** argv) {
                               r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
     HDC dc = GetDC(hwnd);
     PIXELFORMATDESCRIPTOR pfd = {sizeof pfd, 1, PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER, PFD_TYPE_RGBA, 32};
+    pfd.cDepthBits = 24;
     SetPixelFormat(dc, ChoosePixelFormat(dc, &pfd), &pfd);
     wglMakeCurrent(dc, wglCreateContext(dc));
     // ponytail: frame pacing relies on vsync; add a sleep-based limiter if some driver ignores it
     if (auto swapInterval = (BOOL(WINAPI*)(int))wglGetProcAddress("wglSwapIntervalEXT")) swapInterval(1);
 
-    glMatrixMode(GL_PROJECTION);
-    glOrtho(0, W, H, 0, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_COLOR_MATERIAL);  // render.mesh color drives the lit material
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+    glEnable(GL_NORMALIZE);       // keep lighting right on scaled meshes
+    const GLfloat ambient[] = {0.35f, 0.35f, 0.4f, 1};
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
+    buildMeshes();
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     SelectObject(dc, CreateFontW(-64, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -404,7 +539,7 @@ int main(int argc, char** argv) {
         int vw = std::min<int>(rc.right, rc.bottom * W / H), vh = vw * H / W;  // 4:3 letterbox
         glViewport((rc.right - vw) / 2, (rc.bottom - vh) / 2, vw, vh);
         glClearColor(0, 0, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         pollInput();
         frame();
         SwapBuffers(dc);

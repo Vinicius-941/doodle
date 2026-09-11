@@ -10,8 +10,12 @@
 
 struct Value;
 using Array = std::vector<Value>;
-// nil | bool | number | string | array (arrays are shared, managed references)
-using ValueBase = std::variant<std::monostate, bool, double, std::string, std::shared_ptr<Array>>;
+struct Vec3 {
+    double x = 0, y = 0, z = 0;
+    bool operator==(const Vec3& o) const { return x == o.x && y == o.y && z == o.z; }
+};
+// nil | bool | number | string | array | vec3 (arrays are shared, managed references; vec3 is copied)
+using ValueBase = std::variant<std::monostate, bool, double, std::string, std::shared_ptr<Array>, Vec3>;
 struct Value : ValueBase { using ValueBase::ValueBase; };
 
 // Error already tagged with "file:line:" — thrown by the compiler and the VM.
@@ -25,6 +29,7 @@ enum Op : int {
     OP_JMP, OP_JF, OP_JT,   // absolute target; JF/JT pop the condition
     OP_CALL, OP_NATIVE,     // operands: index, argc
     OP_RET, OP_ARRAY, OP_INDEX, OP_SET_INDEX,
+    OP_GET_MEMBER, OP_SET_MEMBER,  // operand: vec3 component 0..2; SET pops [vec, value], pushes the new vec
 };
 
 struct Function {
@@ -56,7 +61,7 @@ public:
     std::vector<NativeFn> natives;
     std::unordered_map<std::string, Value> constants;  // "Button.A" -> 4, inlined at compile time
 
-    VM();  // registers the language built-ins: len, print, destroy_self
+    VM();  // registers the language built-ins: len, print, destroy_self, vec3, math.*
     void addNative(const std::string& name, NativeFn fn);
     std::unique_ptr<Instance> instantiate(std::shared_ptr<ObjectDef> def);  // runs field inits + create()
     Value call(Instance& self, const std::string& fn, std::vector<Value> args = {});  // no-op if fn is undefined
@@ -68,3 +73,7 @@ private:
 
 bool truthy(const Value& v);
 std::string toString(const Value& v);
+
+// Argument checks for natives; throw a readable error on a missing/wrong argument.
+double argNum(const std::vector<Value>& a, size_t i);
+Vec3 argVec(const std::vector<Value>& a, size_t i);
