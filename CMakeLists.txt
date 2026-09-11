@@ -11,14 +11,19 @@ endif()
 add_library(doo STATIC doo-compiler/compiler.cpp vm-runtime/vm.cpp)
 target_include_directories(doo PUBLIC doo-compiler vm-runtime)
 
+# SDK logic shared by the simulator and the tests (physics); also platform-free
+add_library(sdk STATIC sdk/physics.cpp)
+target_include_directories(sdk PUBLIC sdk)
+target_link_libraries(sdk PUBLIC doo)
+
 # Simulator: virtual Doodle hardware on Windows. Reads firmware/ and games/ from the source tree,
 # so editing a .doo only needs a relaunch from the menu, not a rebuild.
 add_executable(doodle simulator/main.cpp)
-target_link_libraries(doodle PRIVATE doo opengl32 glu32 winmm xinput)
+target_link_libraries(doodle PRIVATE sdk opengl32 glu32 winmm xinput)
 target_compile_definitions(doodle PRIVATE DOODLE_ROOT="${CMAKE_SOURCE_DIR}" UNICODE _UNICODE NOMINMAX)
 
 enable_testing()
 add_executable(doo_test tests/doo_test.cpp)
-target_link_libraries(doo_test PRIVATE doo)
+target_link_libraries(doo_test PRIVATE sdk)
 add_test(NAME doo_test COMMAND doo_test)
 add_test(NAME doo_check COMMAND doodle --check)

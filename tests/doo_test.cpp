@@ -1,6 +1,9 @@
 // Compiler + VM self-check: one Doo object exercising the language subset.
+#include <cmath>
 #include <cstdio>
+#include <unordered_map>
 #include "compiler.h"
+#include "physics.h"
 
 #define CHECK(c) if (!(c)) { printf("FAIL linha %d: %s\n", __LINE__, #c); return 1; }
 
@@ -52,6 +55,34 @@ function vectors() {
 function mathy() { return math.floor(math.sqrt(16.5)) + math.abs(-1) }
 )";
 
+// Objects of one program talking through refs: spawn, method calls, fields, type().
+static const SourceFile levelSrc = {"level.doo", R"(
+object Level
+var e
+function create() {
+    e = spawn(Enemy, vec3(1, 2, 3))
+    e.take_damage(30)
+    e.hp -= 5
+}
+function report() { return type(e) + " " + e.hp + " " + e.position.y }
+)"};
+static const SourceFile enemySrc = {"enemy.doo", R"(
+object Enemy
+use SphereCollider
+var hp = 100
+function take_damage(n) { hp -= n }
+)"};
+
+// Physics: a ball dropped on a floor comes to rest on top of it and reports the contact.
+static const SourceFile ballSrc = {"ball.doo", R"(
+object Ball
+use Rigidbody
+use SphereCollider
+var hits = 0
+function on_collision(other) { if (type(other) == Floor) { hits += 1 } }
+)"};
+static const SourceFile floorSrc = {"floor.doo", "object Floor\nuse BoxCollider\n"};
+
 static bool throws(const char* code, const VM& vm, const char* expectedPrefix) {
     try { compile(code, "x.doo", vm, false); }
     catch (const DooError& e) { return std::string(e.what()).rfind(expectedPrefix, 0) == 0; }
@@ -60,9 +91,21 @@ static bool throws(const char* code, const VM& vm, const char* expectedPrefix) {
 
 int main() {
     VM vm;
+    registerPhysics(vm);
     vm.addNative("system.launch", [](Instance&, std::vector<Value>&) { return Value(); });
+    std::unordered_map<std::string, std::shared_ptr<ObjectDef>> defs;
+    std::vector<std::shared_ptr<Instance>> scene;
+    auto spawn = [&](const std::string& name, Vec3 pos) {  // same contract as the simulator's spawn()
+        auto inst = vm.instantiate(defs.at(name));
+        if (Value* p = inst->field("position")) *p = Value(pos);
+        scene.push_back(inst);
+        vm.call(*inst, "create");
+        return inst;
+    };
+    vm.addNative("spawn", [&](Instance&, std::vector<Value>& a) { return Value(Ref{spawn(std::get<std::string>(a[0]), argVec(a, 1))}); });
 
     auto t = vm.instantiate(compile(src, "t.doo", vm, false));
+    vm.call(*t, "create");
     CHECK(std::get<double>(t->fields[0]) == 55);
     CHECK(std::get<double>(t->fields[1]) == 255);
     CHECK(std::get<double>(vm.call(*t, "loops")) == 103);
@@ -78,8 +121,28 @@ int main() {
     CHECK(throws("object X\nfunction f() {\n y = 1 }", vm, "x.doo:3:"));                  // undeclared variable
     CHECK(throws("object X\nfunction f() { g(1) }\nfunction g() {}", vm, "x.doo:2:"));    // wrong arity
     CHECK(throws("object X\nfunction f() { system.launch(\"a\") }", vm, "x.doo:2:"));     // firmware-only API
-    CHECK(throws("object X\nfunction f() { var v = vec3()\n return v.w }", vm, "x.doo:3:")); // vec3 has only x/y/z
+    CHECK(throws("object X\nuse Foo", vm, "x.doo:2:"));                                   // unknown component
     CHECK(compile("object X\nfunction f() { system.launch(\"a\") }", "fw.doo", vm, true)); // ...allowed when privileged
+
+    for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc}, vm, false)) defs[d->name] = d;
+    auto level = spawn("Level", {});
+    CHECK(std::get<std::string>(vm.call(*level, "report")) == "Enemy 65 2");
+
+    auto ball = spawn("Ball", {0, 3, 0});
+    auto ground = spawn("Floor", {0, -0.5, 0});
+    *ground->field("size") = Value(Vec3{10, 1, 10});
+    for (int i = 0; i < 120; i++) physicsStep(vm, scene, 1.0 / 60);
+    Vec3 p = std::get<Vec3>(*ball->field("position"));
+    CHECK(std::fabs(p.y - 0.5) < 0.01 && p.x == 0);  // resting on the floor (radius 0.5)
+    CHECK(std::get<bool>(*ball->field("grounded")));
+    CHECK(std::get<double>(*ball->field("hits")) > 0);
+
+    auto roller = spawn("Ball", {3, 0.5, 0});  // rolling into a wall stops at its face
+    *roller->field("velocity") = Value(Vec3{5, 0, 0});
+    auto wall = spawn("Floor", {4.5, 2, 0});
+    *wall->field("size") = Value(Vec3{1, 4, 10});
+    for (int i = 0; i < 60; i++) physicsStep(vm, scene, 1.0 / 60);
+    CHECK(std::fabs(std::get<Vec3>(*roller->field("position")).x - 3.5) < 0.01);
 
     puts("doo_test: ok");
     return 0;

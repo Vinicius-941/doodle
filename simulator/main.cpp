@@ -20,7 +20,9 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <unordered_map>
 #include "compiler.h"
+#include "physics.h"
 
 namespace fs = std::filesystem;
 using Args = std::vector<Value>;
@@ -35,9 +37,11 @@ static const WORD padMap[NBUTTONS] = {
     XINPUT_GAMEPAD_A, XINPUT_GAMEPAD_B, XINPUT_GAMEPAD_X, XINPUT_GAMEPAD_Y,
     XINPUT_GAMEPAD_LEFT_SHOULDER, XINPUT_GAMEPAD_RIGHT_SHOULDER, XINPUT_GAMEPAD_START, 0, XINPUT_GAMEPAD_BACK};
 
+// A running program (firmware or game): its objects and the instances alive in its scene.
 struct Program {
-    std::unique_ptr<Instance> inst;
-    fs::path base;  // render.image paths are relative to this
+    std::unordered_map<std::string, std::shared_ptr<ObjectDef>> objects;
+    std::vector<std::shared_ptr<Instance>> scene;  // scene[0] = the object from main.doo (the program's root)
+    fs::path base;                                 // render.image paths are relative to this
 };
 
 static fs::path root;
@@ -59,14 +63,16 @@ static Camera cam;
 static int mode = -1;  // projection in use: 0 = 2D screen, 1 = 3D camera, -1 = must re-apply
 
 // Every draw call picks its projection, so games can mix 3D scenes and a 2D HUD freely.
+// 2D always draws and writes the nearest depth, so it stays on top of 3D drawn later in the frame (HUD).
 static void mode2D() {
     if (mode == 0) return;
     mode = 0;
-    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_ALWAYS);
     glDisable(GL_LIGHTING);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(0, W, H, 0, -1, 1);
+    glOrtho(0, W, H, 0, 0, 1);  // z = 0 -> depth 0 (nearest)
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 }
@@ -75,6 +81,7 @@ static void mode3D() {
     if (mode == 1) return;
     mode = 1;
     glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
     glEnable(GL_LIGHTING);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -288,22 +295,51 @@ static std::vector<std::string> installedGames() {
     return ids;
 }
 
-static void load(Program& prog, const fs::path& base, const std::string& file, bool privileged) {
-    prog.inst.reset();
+// Every .doo of a program folder (one object each); main.doo first, since its object is the root.
+static std::vector<SourceFile> sources(const std::string& dir) {
+    std::vector<SourceFile> files;
+    std::error_code ec;
+    for (auto& e : fs::directory_iterator(root / fs::u8path(dir), ec))
+        if (e.path().extension() == ".doo") files.push_back({dir + "/" + e.path().filename().u8string(), readFile(e.path())});
+    auto main = std::find_if(files.begin(), files.end(), [&](const SourceFile& f) { return f.file == dir + "/main.doo"; });
+    if (main == files.end()) throw std::runtime_error(dir + "/main.doo não encontrado");
+    std::iter_swap(files.begin(), main);
+    return files;
+}
+
+// Instances join the scene before create(), so whatever they spawn in create() comes after them.
+static std::shared_ptr<Instance> spawnIn(Program& prog, const std::shared_ptr<ObjectDef>& def, const Vec3* position) {
+    auto inst = vm.instantiate(def);
+    if (Value* p = inst->field("position"); p && position) *p = Value(*position);
+    prog.scene.push_back(inst);
+    vm.call(*inst, "create");
+    return inst;
+}
+
+static void load(Program& prog, const std::string& dir, const fs::path& base, bool privileged) {
+    prog = Program{};
     prog.base = base;
     active = &prog;
     cam = {};  // each program starts with the default camera
     mode = -1;
-    prog.inst = vm.instantiate(compile(readFile(root / fs::u8path(file)), file, vm, privileged));
+    auto defs = compileAll(sources(dir), vm, privileged);
+    for (auto& d : defs) prog.objects[d->name] = d;
+    spawnIn(prog, defs[0], nullptr);
+}
+
+static void unload(Program& prog) {  // destroy() on everything still alive, then drop the program
+    auto scene = std::move(prog.scene);
+    prog = Program{};
+    for (auto& inst : scene) if (inst->alive) vm.call(*inst, "destroy");
 }
 
 static void bootFirmware() {
-    game.inst.reset();
-    load(firmware, root, "firmware/main.doo", true);
+    game = Program{};
+    load(firmware, "firmware", root, true);
 }
 
 static void backToFirmware() {
-    game.inst.reset();
+    game = Program{};
     active = &firmware;
 }
 
@@ -332,12 +368,26 @@ static int button(Args& a) {
 static void registerSdk() {
     for (int i = 0; i < NBUTTONS; i++) vm.constants["Button." + std::string(buttonNames[i])] = Value(double(i));
     for (int i = 0; i < NMESHES; i++) vm.constants["Mesh." + std::string(meshNames[i])] = Value(double(i));
+    registerPhysics(vm);
+
+    vm.addNative("spawn", [](Instance&, Args& a) {  // (Object, position?) -> ref to the new instance
+        std::string name = str(a, 0);
+        auto it = active->objects.find(name);
+        if (it == active->objects.end()) throw std::runtime_error("o objeto '" + name + "' não existe neste programa");
+        Vec3 pos = a.size() > 1 ? argVec(a, 1) : Vec3{};
+        return Value(Ref{spawnIn(*active, it->second, a.size() > 1 ? &pos : nullptr)});
+    });
 
     vm.addNative("rgb", [](Instance&, Args& a) {
         auto c = [&](size_t i) { return std::clamp((int)argNum(a, i), 0, 255); };
         return Value(double(c(0) << 16 | c(1) << 8 | c(2)));
     });
-    vm.addNative("render.clear", [](Instance&, Args& a) { rect(0, 0, W, H, argNum(a, 0)); return Value(); });
+    vm.addNative("render.clear", [](Instance&, Args& a) {  // fills the screen (scissored to it) and resets depth
+        int c = (int)argNum(a, 0);
+        glClearColor((c >> 16 & 255) / 255.f, (c >> 8 & 255) / 255.f, (c & 255) / 255.f, 1);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        return Value();
+    });
     vm.addNative("render.rect", [](Instance&, Args& a) {
         rect(argNum(a, 0), argNum(a, 1), argNum(a, 2), argNum(a, 3), argNum(a, 4));
         return Value();
@@ -431,38 +481,50 @@ static void frame() {
         return;
     }
     if (active == &game && justPressed(BTN_HOME)) {  // HOME always belongs to the system
-        guarded([] { vm.call(*game.inst, "destroy"); });
+        guarded([] { unload(game); });
         backToFirmware();
         return;
     }
     guarded([] {
-        Instance& inst = *active->inst;
-        vm.call(inst, "update");
-        if (!inst.alive) {  // destroy_self(): a game exits to the menu, the firmware powers off
-            vm.call(inst, "destroy");
-            if (active == &game) backToFirmware(); else PostQuitMessage(0);
+        // Frame lifecycle: update() on everyone -> physics (+ on_collision) -> draw() -> destroy() on the dead.
+        // Indexed loops: instances spawned during the frame join in right away.
+        auto& scene = active->scene;
+        if (scene.empty()) return;
+        for (size_t i = 0; i < scene.size(); i++) if (scene[i]->alive) vm.call(*scene[i], "update");
+        physicsStep(vm, scene, dt);
+        for (size_t i = 0; i < scene.size(); i++) if (scene[i]->alive) vm.call(*scene[i], "draw");
+        for (size_t i = 0; i < scene.size(); i++) if (!scene[i]->alive) vm.call(*scene[i], "destroy");
+        if (!scene[0]->alive) {  // the root destroyed itself: a game exits to the menu, the firmware powers off
+            if (active == &game) {
+                unload(game);
+                backToFirmware();
+            } else {
+                PostQuitMessage(0);
+            }
+            return;
         }
+        scene.erase(std::remove_if(scene.begin(), scene.end(), [](auto& i) { return !i->alive; }), scene.end());
         if (!pendingLaunch.empty()) {
             std::string id;
             id.swap(pendingLaunch);
-            load(game, gameDir(id), "games/" + id + "/main.doo", false);
+            load(game, "games/" + id, gameDir(id), false);
         }
     });
 }
 
 static int checkAll() {
-    auto check = [](const std::string& file, bool privileged) {
+    auto check = [](const std::string& dir, bool privileged) {
         try {
-            compile(readFile(root / fs::u8path(file)), file, vm, privileged);
-            printf("ok    %s\n", file.c_str());
+            compileAll(sources(dir), vm, privileged);
+            printf("ok    %s\n", dir.c_str());
             return true;
         } catch (const std::exception& e) {
             printf("ERRO  %s\n", e.what());
             return false;
         }
     };
-    bool ok = check("firmware/main.doo", true);
-    for (auto& id : installedGames()) ok &= check("games/" + id + "/main.doo", false);
+    bool ok = check("firmware", true);
+    for (auto& id : installedGames()) ok &= check("games/" + id, false);
     return ok ? 0 : 1;
 }
 
@@ -537,9 +599,13 @@ int main(int argc, char** argv) {
         RECT rc;
         GetClientRect(hwnd, &rc);
         int vw = std::min<int>(rc.right, rc.bottom * W / H), vh = vw * H / W;  // 4:3 letterbox
-        glViewport((rc.right - vw) / 2, (rc.bottom - vh) / 2, vw, vh);
+        int vx = (rc.right - vw) / 2, vy = (rc.bottom - vh) / 2;
+        glViewport(vx, vy, vw, vh);
+        glDisable(GL_SCISSOR_TEST);  // black bars, then keep render.clear inside the virtual screen
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glScissor(vx, vy, vw, vh);
+        glEnable(GL_SCISSOR_TEST);
         pollInput();
         frame();
         SwapBuffers(dc);

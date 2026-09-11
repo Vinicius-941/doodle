@@ -1,49 +1,53 @@
 object Test3D
 
-// Jogo-base 3D de teste: controle "tank" estilo PS1, pulo com gravidade e câmera em 3ª pessoa.
+// Fase de teste 3D: monta o cenário com spawn, e cuida da câmera e do HUD.
 
-var player = vec3(0, 1, 0)
-var heading = 0   // para onde o jogador olha, em graus
-var vy = 0        // velocidade vertical
-var spin = 0
+var player
+var total = 0
+var camy = 1
 
-function update() {
-    var dt = time.delta
-    spin += 90 * dt
+function create() {
+    block(vec3(0, -0.5, 0), vec3(80, 1, 80), 0x5E9E48)   // chão
 
-    if (input.pressed(Button.Left))  { heading += 140 * dt }
-    if (input.pressed(Button.Right)) { heading -= 140 * dt }
-    var rad = heading * math.pi / 180
-    var forward = vec3(math.sin(rad), 0, math.cos(rad))
-    if (input.pressed(Button.Up))   { player += forward * 5 * dt }
-    if (input.pressed(Button.Down)) { player -= forward * 3 * dt }
-
-    if (input.just_pressed(Button.A) && player.y <= 1) { vy = 7 }
-    vy -= 20 * dt
-    player.y += vy * dt
-    if (player.y < 1) {
-        player.y = 1
-        vy = 0
+    for (var i = 0; i < 3; i += 1) {                      // escada de caixas: pule de uma pra outra
+        var h = i + 1
+        block(vec3(5 + i * 2, h / 2, 6), vec3(2, h, 2), 0xC08040)
     }
-    if (input.just_pressed(Button.B)) { destroy_self() }
+    coin(vec3(9, 3.8, 6))                                 // prêmio no alto da escada
 
-    // câmera atrás do jogador, sem acompanhar o pulo (assim o pulo aparece na tela)
-    var ground = vec3(player.x, 1, player.z)
-    render.clear(0x7FB2E5)
-    render.camera(ground - forward * 7 + vec3(0, 3.5, 0), ground + vec3(0, 0.5, 0), 60)
-    render.mesh(Mesh.Plane, vec3(0, 0, 0), vec3(0, 0, 0), vec3(400, 1, 400), 0x5E9E48)
-
-    // anel de pilares
-    for (var i = 0; i < 12; i += 1) {
+    for (var i = 0; i < 12; i += 1) {                     // anel de pilares
         var a = i * math.pi / 6
-        render.mesh(Mesh.Cylinder, vec3(math.sin(a) * 15, 1, math.cos(a) * 15), vec3(0, 0, 0), 1, 0xC8C0B0)
+        block(vec3(math.sin(a) * 16, 2, math.cos(a) * 16), vec3(1, 4, 1), 0xC8C0B0)
     }
-    render.mesh(Mesh.Cube, vec3(4, 1, 6), vec3(0, spin, 0), 1.5, 0xE0A040)
-    render.mesh(Mesh.Sphere, vec3(-4, 1 + math.abs(math.sin(spin * math.pi / 90)) * 1.5, 6), vec3(0, 0, 0), 1.5, 0xD85A5A)
+    for (var i = 0; i < 6; i += 1) {                      // moedas em círculo
+        var a = i * math.pi / 3 + 0.5
+        coin(vec3(math.sin(a) * 9, 1, math.cos(a) * 9))
+    }
+    player = spawn(Player, vec3(0, 1, 0))
+}
 
-    render.mesh(Mesh.Capsule, player, vec3(0, heading, 0), 1, 0xF2F2F2)
+function block(pos, size, color) {
+    var b = spawn(Block, pos)
+    b.size = size
+    b.color = color
+}
 
-    // HUD 2D por cima da cena
-    render.text(20, 16, "Teste 3D", 26, 0xFFFFFF)
-    render.text(20, 448, "Setas: andar/girar    Z: pular    X: sair    Esc: HOME", 15, 0xFFFFFF)
+function coin(pos) {
+    spawn(Coin, pos)
+    total += 1
+}
+
+function draw() {
+    // câmera atrás do jogador; a altura segue com atraso, então o pulo aparece e a escada também
+    var p = player.position
+    camy += (p.y - camy) * 4 * time.delta
+    var target = vec3(p.x, camy + 0.5, p.z)
+    render.clear(0x7FB2E5)
+    render.camera(target - player.forward() * 7 + vec3(0, 3, 0), target, 60)
+
+    render.text(20, 16, "Moedas: " + player.coins + " / " + total, 26, 0xFFFFFF)
+    if (player.coins == total) {
+        render.text(20, 50, "Você pegou todas!", 22, 0xFFE070)
+    }
+    render.text(20, 448, "Setas: andar/girar    Z: pular    Esc: HOME", 15, 0xFFFFFF)
 }

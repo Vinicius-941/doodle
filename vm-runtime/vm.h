@@ -9,13 +9,26 @@
 #include <vector>
 
 struct Value;
+struct Instance;
 using Array = std::vector<Value>;
+
 struct Vec3 {
     double x = 0, y = 0, z = 0;
+    Vec3 operator+(const Vec3& o) const { return {x + o.x, y + o.y, z + o.z}; }
+    Vec3 operator-(const Vec3& o) const { return {x - o.x, y - o.y, z - o.z}; }
+    Vec3 operator*(double k) const { return {x * k, y * k, z * k}; }
+    double dot(const Vec3& o) const { return x * o.x + y * o.y + z * o.z; }
     bool operator==(const Vec3& o) const { return x == o.x && y == o.y && z == o.z; }
 };
-// nil | bool | number | string | array | vec3 (arrays are shared, managed references; vec3 is copied)
-using ValueBase = std::variant<std::monostate, bool, double, std::string, std::shared_ptr<Array>, Vec3>;
+
+// ref<Object>: managed reference to an instance; it stops working once the instance is destroyed.
+struct Ref {
+    std::weak_ptr<Instance> p;
+    bool operator==(const Ref& o) const { return !p.owner_before(o.p) && !o.p.owner_before(p); }
+};
+
+// nil | bool | number | string | array | vec3 | ref (arrays and refs are shared; vec3 is copied)
+using ValueBase = std::variant<std::monostate, bool, double, std::string, std::shared_ptr<Array>, Vec3, Ref>;
 struct Value : ValueBase { using ValueBase::ValueBase; };
 
 // Error already tagged with "file:line:" — thrown by the compiler and the VM.
@@ -29,7 +42,8 @@ enum Op : int {
     OP_JMP, OP_JF, OP_JT,   // absolute target; JF/JT pop the condition
     OP_CALL, OP_NATIVE,     // operands: index, argc
     OP_RET, OP_ARRAY, OP_INDEX, OP_SET_INDEX,
-    OP_GET_MEMBER, OP_SET_MEMBER,  // operand: vec3 component 0..2; SET pops [vec, value], pushes the new vec
+    OP_GET_MEMBER, OP_SET_MEMBER,  // operand: name const (vec3 x/y/z or instance field); SET pops [obj, value], pushes obj
+    OP_INVOKE,                     // obj.method(args) — operands: name const, argc
 };
 
 struct Function {
@@ -43,7 +57,8 @@ struct Function {
 struct ObjectDef {
     std::string name, file;
     std::vector<std::string> fields;
-    std::vector<Function> funcs;  // funcs[0] = __init (field initializers)
+    std::vector<std::string> uses;  // components: `use Rigidbody`
+    std::vector<Function> funcs;    // funcs[0] = __init (field initializers)
     std::unordered_map<std::string, int> funcIndex;
 };
 
@@ -51,6 +66,11 @@ struct Instance {
     std::shared_ptr<ObjectDef> def;
     std::vector<Value> fields;
     bool alive = true;
+
+    Value* field(const std::string& name) {  // nullptr if the object has no such field
+        for (size_t i = 0; i < def->fields.size(); i++) if (def->fields[i] == name) return &fields[i];
+        return nullptr;
+    }
 };
 
 using NativeFn = std::function<Value(Instance& self, std::vector<Value>& args)>;
@@ -60,10 +80,12 @@ public:
     std::unordered_map<std::string, int> nativeIndex;  // "input.pressed" -> slot in natives
     std::vector<NativeFn> natives;
     std::unordered_map<std::string, Value> constants;  // "Button.A" -> 4, inlined at compile time
+    // `use X` components -> fields they add (with defaults) when the object doesn't declare them
+    std::unordered_map<std::string, std::vector<std::pair<std::string, Value>>> components;
 
-    VM();  // registers the language built-ins: len, print, destroy_self, vec3, math.*
+    VM();  // registers the language built-ins: len, print, type, destroy_self, vec3, math.*
     void addNative(const std::string& name, NativeFn fn);
-    std::unique_ptr<Instance> instantiate(std::shared_ptr<ObjectDef> def);  // runs field inits + create()
+    std::shared_ptr<Instance> instantiate(std::shared_ptr<ObjectDef> def);  // runs field initializers (not create)
     Value call(Instance& self, const std::string& fn, std::vector<Value> args = {});  // no-op if fn is undefined
 
 private:

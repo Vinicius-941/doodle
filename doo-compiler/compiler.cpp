@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <unordered_set>
 
 // ---------- lexer ----------
 
@@ -277,6 +278,7 @@ struct Codegen {
     ObjectDef& obj;
     const VM& vm;
     bool privileged;
+    const std::unordered_set<std::string>& objects;  // object names of the program: spawn(Enemy, ...)
     Function* f = nullptr;
     std::vector<std::pair<std::string, int>> scope;  // visible locals -> slot
     int line = 0;
@@ -370,8 +372,8 @@ struct Codegen {
     void assign(Node* n) {
         Node* target = n->kids[0].get();
         std::string op = n->text.substr(0, n->text.size() - 1);  // "+=" -> "+", "=" -> ""
-        if (target->kind == K::Member) {  // v.x = e: rebuild the vec3, then store it back into v
-            if (target->kids[0]->kind != K::Name) throw err("só dá pra alterar .x/.y/.z de uma variável");
+        if (target->kind == K::Member) {  // v.x = e / enemy.hp = e: set the member, then store v back (vec3 is a copy)
+            if (target->kids[0]->kind != K::Name) throw err("só dá pra alterar membro de uma variável (ex.: v.x, inimigo.vida)");
             expr(target->kids[0].get());
         }
         if (target->kind == K::Index) { expr(target->kids[0].get()); expr(target->kids[1].get()); }
@@ -381,7 +383,7 @@ struct Codegen {
         if (!op.empty()) emit(binop(op));
         if (target->kind == K::Index) return emit(OP_SET_INDEX);
         if (target->kind == K::Member) {
-            emit(OP_SET_MEMBER, component(target));
+            emit(OP_SET_MEMBER, constant(Value(target->text)));
             target = target->kids[0].get();
         }
         int s = local(target->text);
@@ -398,11 +400,6 @@ struct Codegen {
         return base->text + "." + m->text;
     }
 
-    int component(Node* m) const {
-        if (m->text == "x" || m->text == "y" || m->text == "z") return m->text[0] - 'x';
-        throw err("'." + m->text + "' não existe (vec3 tem .x, .y, .z)");
-    }
-
     void native(const std::string& name, int argc) {
         auto it = vm.nativeIndex.find(name);
         if (it == vm.nativeIndex.end()) throw err("função desconhecida '" + name + "'");
@@ -414,10 +411,16 @@ struct Codegen {
     void call(Node* n) {
         Node* callee = n->kids[0].get();
         int argc = (int)n->kids.size() - 1;
-        std::string name = callee->kind == K::Name ? callee->text : callee->kind == K::Member ? qualified(callee) : "";
-        if (name.empty()) throw err("isso não é uma função");
+        bool method = callee->kind == K::Member && qualified(callee).empty();  // enemy.take_damage(10)
+        if (method) expr(callee->kids[0].get());
         for (size_t i = 1; i < n->kids.size(); i++) expr(n->kids[i].get());
         line = n->line;
+        if (method) {
+            emit(OP_INVOKE, constant(Value(callee->text)));
+            return emit(argc);
+        }
+        std::string name = callee->kind == K::Name ? callee->text : callee->kind == K::Member ? qualified(callee) : "";
+        if (name.empty()) throw err("isso não é uma função");
         auto it = obj.funcIndex.find(name);
         if (it == obj.funcIndex.end()) return native(name, argc);
         int arity = obj.funcs[it->second].arity;
@@ -437,13 +440,14 @@ struct Codegen {
             if (s >= 0) { emit(OP_GET_LOCAL, s); break; }
             s = field(n->text);
             if (s >= 0) { emit(OP_GET_FIELD, s); break; }
+            if (objects.count(n->text)) { emit(OP_CONST, constant(Value(n->text))); break; }  // object type = its name
             throw err("'" + n->text + "' não foi declarada");
         }
         case K::Member: {
             std::string q = qualified(n);
-            if (q.empty()) {  // value.x / .y / .z
+            if (q.empty()) {  // v.x on a vec3, enemy.hp on an instance
                 expr(n->kids[0].get());
-                emit(OP_GET_MEMBER, component(n));
+                emit(OP_GET_MEMBER, constant(Value(n->text)));
                 break;
             }
             auto c = vm.constants.find(q);  // Button.A (constant) or time.delta (SDK property = zero-arg native)
@@ -478,18 +482,30 @@ struct Codegen {
     }
 };
 
-std::shared_ptr<ObjectDef> compile(const std::string& source, const std::string& file, const VM& vm, bool privileged) {
-    Parser ps{lex(source, file), 0, file};
-    auto obj = std::make_shared<ObjectDef>();
-    obj->file = file;
+struct Parsed {
+    std::shared_ptr<ObjectDef> obj;
+    std::vector<P> inits;  // field initializers, parallel to obj->fields
+    std::vector<FuncDecl> decls;
+};
+
+static Parsed parse(const SourceFile& src, const VM& vm) {
+    Parser ps{lex(src.source, src.file), 0, src.file};
+    Parsed out;
+    out.obj = std::make_shared<ObjectDef>();
+    ObjectDef* obj = out.obj.get();
+    std::vector<P>& inits = out.inits;
+    std::vector<FuncDecl>& decls = out.decls;
+    obj->file = src.file;
     ps.expect("object");
     obj->name = ps.ident();
 
-    std::vector<P> inits;  // field initializers, parallel to obj->fields
-    std::vector<FuncDecl> decls;
     while (ps.peek().kind != Token::End) {
         if (ps.accept(";")) continue;
-        if (ps.accept("var")) {
+        if (ps.accept("use")) {
+            std::string c = ps.ident();
+            if (!vm.components.count(c)) throw ps.err("componente desconhecido '" + c + "'");
+            obj->uses.push_back(c);
+        } else if (ps.accept("var")) {
             std::string name = ps.ident();
             if (std::count(obj->fields.begin(), obj->fields.end(), name)) throw ps.err("'" + name + "' declarada duas vezes");
             obj->fields.push_back(name);
@@ -507,26 +523,62 @@ std::shared_ptr<ObjectDef> compile(const std::string& source, const std::string&
             d.body = ps.block();
             decls.push_back(std::move(d));
         } else {
-            throw ps.err("esperado 'var' ou 'function', encontrado '" + ps.peek().text + "'");
+            throw ps.err("esperado 'use', 'var' ou 'function', encontrado '" + ps.peek().text + "'");
         }
     }
 
-    // All signatures first, so bodies can call functions declared further down.
-    obj->funcs.resize(decls.size() + 1);
-    obj->funcs[0].name = "__init";
-    for (size_t i = 0; i < decls.size(); i++) {
-        obj->funcs[i + 1].name = decls[i].name;
-        obj->funcs[i + 1].arity = (int)decls[i].params.size();
+    // Fields the components bring (`use Rigidbody` -> velocity...), unless the object declared them itself.
+    for (auto& c : obj->uses) {
+        for (auto& [name, value] : vm.components.at(c)) {
+            if (std::count(obj->fields.begin(), obj->fields.end(), name)) continue;
+            obj->fields.push_back(name);
+            auto lit = std::make_unique<Node>();
+            lit->kind = K::Lit;
+            lit->line = 1;
+            lit->value = value;
+            inits.push_back(std::move(lit));
+        }
     }
-    Codegen g{*obj, vm, privileged};
-    g.f = &obj->funcs[0];
-    for (size_t i = 0; i < inits.size(); i++) {
-        if (!inits[i]) continue;
-        g.expr(inits[i].get());
+    return out;
+}
+
+static void generate(Parsed& p, const VM& vm, bool privileged, const std::unordered_set<std::string>& objects) {
+    ObjectDef& obj = *p.obj;
+    // All signatures first, so bodies can call functions declared further down.
+    obj.funcs.resize(p.decls.size() + 1);
+    obj.funcs[0].name = "__init";
+    for (size_t i = 0; i < p.decls.size(); i++) {
+        obj.funcs[i + 1].name = p.decls[i].name;
+        obj.funcs[i + 1].arity = (int)p.decls[i].params.size();
+    }
+    Codegen g{obj, vm, privileged, objects};
+    g.f = &obj.funcs[0];
+    for (size_t i = 0; i < p.inits.size(); i++) {
+        if (!p.inits[i]) continue;
+        g.expr(p.inits[i].get());
         g.emit(OP_SET_FIELD, (int)i);
     }
     g.emit(OP_NIL);
     g.emit(OP_RET);
-    for (size_t i = 0; i < decls.size(); i++) g.function(obj->funcs[i + 1], decls[i].params, decls[i].body.get());
-    return obj;
+    for (size_t i = 0; i < p.decls.size(); i++) g.function(obj.funcs[i + 1], p.decls[i].params, p.decls[i].body.get());
+}
+
+std::vector<std::shared_ptr<ObjectDef>> compileAll(const std::vector<SourceFile>& files, const VM& vm, bool privileged) {
+    std::vector<Parsed> parsed;
+    std::unordered_set<std::string> names;
+    for (auto& f : files) {
+        parsed.push_back(parse(f, vm));
+        if (!names.insert(parsed.back().obj->name).second)
+            throw DooError(f.file + ":1: o objeto '" + parsed.back().obj->name + "' já existe em outro arquivo");
+    }
+    std::vector<std::shared_ptr<ObjectDef>> out;
+    for (auto& p : parsed) {
+        generate(p, vm, privileged, names);
+        out.push_back(p.obj);
+    }
+    return out;
+}
+
+std::shared_ptr<ObjectDef> compile(const std::string& source, const std::string& file, const VM& vm, bool privileged) {
+    return compileAll({{file, source}}, vm, privileged)[0];
 }

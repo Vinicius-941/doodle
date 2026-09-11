@@ -1,0 +1,10 @@
+object Block
+
+// Caixa sólida: chão, degraus e pilares.
+use BoxCollider
+
+var color = 0xB0A898
+
+function draw() {
+    render.mesh(Mesh.Cube, position, vec3(0, 0, 0), size, color)
+}

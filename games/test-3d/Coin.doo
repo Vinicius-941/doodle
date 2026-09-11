@@ -1,0 +1,23 @@
+object Coin
+
+// Moeda: gatilho (trigger) que o jogador atravessa e coleta.
+use SphereCollider
+
+var trigger = true
+var spin = 0
+
+function update() {
+    spin += 180 * time.delta
+}
+
+function on_collision(other) {
+    if (type(other) == Player) {
+        other.coins += 1
+        audio.play(1320, 90)
+        destroy_self()
+    }
+}
+
+function draw() {
+    render.mesh(Mesh.Cylinder, position, vec3(90, spin, 0), vec3(0.8, 0.06, 0.8), 0xFFD23F)
+}
