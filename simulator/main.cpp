@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <tuple>
 #include <unordered_map>
 #include "compiler.h"
 #include "obj.h"
@@ -485,8 +486,8 @@ static const Image& image(const fs::path& p) {
     for (auto& c : px) if ((c & 0xFFFFFF) == 0xFF00FF) c = 0;  // magenta = transparent, for images without alpha
     glGenTextures(1, &img.tex);
     glBindTexture(GL_TEXTURE_2D, img.tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    const GLenum GL_GENERATE_MIPMAP = 0x8191;  // GL 1.4: the driver builds the mip levels (no shimmer far away)
+    glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.w, img.h, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, px.data());
     return img;
 }
@@ -760,13 +761,64 @@ static const Model& model(const fs::path& p) {
     return models[p] = std::move(m);
 }
 
+// Terrain meshes, built once per (heights, size, tiling). The cache holds the heights array so its
+// address can't be reused by another one while cached.
+struct TerrainKey {
+    const Array* rows;
+    double sx, sy, sz, tiling;
+    bool operator<(const TerrainKey& o) const { return std::tie(rows, sx, sy, sz, tiling) < std::tie(o.rows, o.sx, o.sy, o.sz, o.tiling); }
+};
+static std::map<TerrainKey, std::pair<std::shared_ptr<Array>, GLuint>> terrainMeshes;
+
+static GLuint terrainMesh(const std::shared_ptr<Array>& rows, Vec3 size, double tiling) {
+    TerrainKey key{rows.get(), size.x, size.y, size.z, tiling};
+    if (auto it = terrainMeshes.find(key); it != terrainMeshes.end()) return it->second.second;
+    std::vector<std::vector<double>> h;  // flat plane: still a 33 x 33 grid, so per-vertex (PS1) lighting shows on it
+    if (rows && rows->size() >= 2) {
+        for (auto& r : *rows) {
+            auto cols = std::get_if<std::shared_ptr<Array>>(&r);
+            if (!cols || (*cols)->size() < 2) throw std::runtime_error("heights: cada linha precisa de 2+ números");
+            h.emplace_back();
+            for (auto& v : **cols) h.back().push_back(argNum({v}, 0));
+            if (h.back().size() != h[0].size()) throw std::runtime_error("heights: todas as linhas precisam do mesmo tamanho");
+        }
+    } else {
+        h.assign(33, std::vector<double>(33, 0.0));
+    }
+    size_t H = h.size(), W = h[0].size();
+    auto P = [&](size_t i, size_t j) {  // local position of grid point (row i, column j)
+        return Vec3{(double(j) / (W - 1) - 0.5) * size.x, h[i][j] * size.y, (double(i) / (H - 1) - 0.5) * size.z};
+    };
+    auto vertex = [&](size_t i, size_t j) {
+        Vec3 dx = P(i, std::min(j + 1, W - 1)) - P(i, j ? j - 1 : 0), dz = P(std::min(i + 1, H - 1), j) - P(i ? i - 1 : 0, j);
+        Vec3 n{dz.y * dx.z - dz.z * dx.y, dz.z * dx.x - dz.x * dx.z, dz.x * dx.y - dz.y * dx.x};  // dz x dx: up
+        Vec3 p = P(i, j);
+        glNormal3d(n.x, n.y, n.z);
+        glTexCoord2d(double(j) / (W - 1) * tiling, double(i) / (H - 1) * tiling);
+        glVertex3d(p.x, p.y, p.z);
+    };
+    GLuint list = glGenLists(1);
+    glNewList(list, GL_COMPILE);
+    glBegin(GL_TRIANGLES);
+    for (size_t i = 0; i + 1 < H; i++) {
+        for (size_t j = 0; j + 1 < W; j++) {  // same split as the physics: (00, 10, 01) and (10, 11, 01)
+            vertex(i, j); vertex(i + 1, j); vertex(i, j + 1);
+            vertex(i, j + 1); vertex(i + 1, j); vertex(i + 1, j + 1);
+        }
+    }
+    glEnd();
+    glEndList();
+    terrainMeshes[key] = {rows, list};
+    return list;
+}
+
 static void drawPart(GLuint list, GLuint tex, Vec3 rgb) {  // lit color x texture (GL_MODULATE / the shader)
     glColor3d(rgb.x, rgb.y, rgb.z);
     if (shader) glUniform1i(shader->useTexture, tex ? 1 : 0);
     if (tex) {
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);  // crisp PS1-style texels in 3D
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);  // crisp texels up close, no shimmer far
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     }
     glCallList(list);
@@ -829,7 +881,7 @@ static void registerSdk() {
         mode2D();
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, img.tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);  // smooth when UI icons are scaled
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);  // smooth when UI icons are scaled
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         setColor(0xFFFFFF, opt(a, 5, 1));
         glBegin(GL_QUADS);
@@ -889,6 +941,37 @@ static void registerSdk() {
         shader = &it->second;
         mode = -1;
         return Value(true);
+    });
+
+    // Terrain (see the Terrain prefab): heights = rows of 0..1, or nil for a flat plane
+    vm.addNative("render.terrain", [](Instance&, Args& a) {  // (position, size, heights, color, texture = "", tiling = 1)
+        Vec3 p = argVec(a, 0), s = argVec(a, 1);
+        auto rows = a.size() > 2 ? std::get_if<std::shared_ptr<Array>>(&a[2]) : nullptr;
+        GLuint list = terrainMesh(rows ? *rows : nullptr, s, opt(a, 5, 1));
+        GLuint tex = a.size() > 4 && !str(a, 4).empty() ? texture(active->base / fs::u8path(str(a, 4))) : 0;
+        mode3D();
+        glPushMatrix();
+        glTranslated(p.x, p.y, p.z);
+        drawPart(list, tex, rgb01(argNum(a, 3)));
+        glPopMatrix();
+        return Value();
+    });
+    vm.addNative("render.heightmap", [](Instance&, Args& a) {  // ("relevo.png") -> rows of 0..1 (brightness), max 129 x 129
+        int w = 0, h = 0;
+        std::vector<uint32_t> px;
+        if (!decodeImage(active->base / fs::u8path(str(a, 0)), w, h, px) || w < 2 || h < 2)
+            throw std::runtime_error("heightmap não encontrado ou inválido: " + str(a, 0));
+        int step = std::max(1, (std::max(w, h) - 1 + 127) / 128);  // keeps the grid (and the mesh) small
+        auto rows = std::make_shared<Array>();
+        for (int y = 0; y < h; y += step) {
+            auto row = std::make_shared<Array>();
+            for (int x = 0; x < w; x += step) {
+                uint32_t c = px[size_t(y) * w + x];
+                row->push_back(Value(((c >> 16 & 255) + (c >> 8 & 255) + (c & 255)) / 765.0));
+            }
+            rows->push_back(Value(row));
+        }
+        return Value(rows);
     });
 
     // (Mesh.X or "model.obj", position, rotation in degrees, scale, color, texture = "")

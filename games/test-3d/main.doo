@@ -4,6 +4,7 @@ object Test3D
 // e cuida do dia/noite. A câmera vem do Player (BasicCharacterController, prefab do SDK).
 
 var player
+var chao
 var casa
 var lampada
 var total = 0
@@ -22,7 +23,13 @@ var sMusica
 var bSair
 
 function create() {
-    block(vec3(0, -0.5, 0), vec3(80, 1, 80), 0x5E9E48, "")   // chão
+    chao = spawn(Terrain, vec3(0, 0, 0))     // vale plano no meio, morros em volta (prefab Terrain)
+    chao.heightmap = "relevo.png"
+    chao.size = vec3(90, 7, 90)
+    chao.texture = "grama.png"
+    chao.tiling = 22
+    chao.build()
+    coin(vec3(0, chao.height_at(0, -31) + 1.2, -31))       // prêmio no alto do morro norte
 
     for (var i = 0; i < 3; i += 1) {                          // escada de caixas: pule de uma pra outra
         var h = i + 1

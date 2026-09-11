@@ -93,6 +93,7 @@ var hits = 0
 function on_collision(other) { if (type(other) == Floor) { hits += 1 } }
 )"};
 static const SourceFile floorSrc = {"floor.doo", "object Floor\nuse BoxCollider\n"};
+static const SourceFile hillSrc = {"hill.doo", "object Hill\nuse TerrainCollider\n"};
 
 // Inheritance: merged fields/functions, derived initializers win, virtual calls, super, errors in the parent's file.
 static const SourceFile animalSrc = {"animal.doo", R"doo(object Animal
@@ -229,7 +230,7 @@ int main() {
     step(4);
     CHECK(std::get<bool>(uiField("b2", "clicked")) && !std::get<bool>(uiField("b1", "clicked")));
 
-    for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc}, vm, false)) defs[d->name] = d;
+    for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc, hillSrc}, vm, false)) defs[d->name] = d;
     auto level = spawn("Level", {});
     CHECK(std::get<std::string>(vm.call(*level, "report")) == "Enemy 65 2");
 
@@ -248,6 +249,20 @@ int main() {
     *wall->field("size") = Value(Vec3{1, 4, 10});
     for (int i = 0; i < 60; i++) physicsStep(vm, scene, 1.0 / 60);
     CHECK(std::fabs(std::get<Vec3>(*roller->field("position")).x - 3.5) < 0.01);
+
+    // Terrain: a 2x2 heightmap ramp (0 -> 4 along x) far from the rest; the ball rests on the triangle's surface
+    auto hill = spawn("Hill", {100, 0, 0});
+    auto ramp = std::make_shared<Array>();
+    for (int r = 0; r < 2; r++) ramp->push_back(Value(std::make_shared<Array>(Array{Value(0.0), Value(1.0)})));
+    *hill->field("heights") = Value(ramp);
+    *hill->field("size") = Value(Vec3{10, 4, 10});
+    auto onHill = spawn("Ball", {100, 5, 0});
+    auto offHill = spawn("Ball", {120, 5, 0});  // outside the terrain: nothing under it
+    for (int i = 0; i < 90; i++) physicsStep(vm, scene, 1.0 / 60);
+    CHECK(std::fabs(std::get<Vec3>(*onHill->field("position")).y - 2.5) < 0.01);  // ground 2.0 at the middle + radius
+    CHECK(std::get<bool>(*onHill->field("grounded")) && std::get<Vec3>(*offHill->field("position")).y < 0);
+    std::vector<Value> xz = {Value(102.5), Value(-2.5)};  // 75% along the ramp (x) -> height 0.75 * 4
+    CHECK(std::get<double>(vm.natives[vm.nativeIndex.at("physics.terrain_height")](*hill, xz)) == 3);
 
     // .obj: a quad (with a relative -1 index) fanned into 2 triangles, flat normal, material from the .mtl
     auto parts = parseObj("mtllib m.mtl\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvt 0 0\nvt 1 1\nusemtl tijolo\nf 1/1 2/1 3/2 -1/2\n",
