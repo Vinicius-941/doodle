@@ -1,0 +1,13 @@
+newmtl parede
+Kd 1 1 1
+map_Kd parede.png
+
+newmtl telhado
+Kd 1 1 1
+map_Kd telhado.png
+
+newmtl porta
+Kd 0.4 0.25 0.12
+
+newmtl janela
+Kd 0.55 0.75 0.95

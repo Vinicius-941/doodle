@@ -12,6 +12,7 @@
 #include <Xinput.h>
 #include <GL/gl.h>
 #include <GL/glu.h>
+#include <wincodec.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -22,6 +23,7 @@
 #include <map>
 #include <unordered_map>
 #include "compiler.h"
+#include "obj.h"
 #include "physics.h"
 
 namespace fs = std::filesystem;
@@ -95,18 +97,21 @@ static void mode3D() {
 }
 
 // Unity-style primitives at unit size: Cube 1, Sphere Ø1, Cylinder and Capsule Ø1 x 2 tall, Plane 1x1 facing up.
+// All carry texture coords (GL convention: t = 0 at the bottom of the image).
 enum Mesh { MESH_CUBE, MESH_SPHERE, MESH_CYLINDER, MESH_CAPSULE, MESH_PLANE, NMESHES };
 static const char* meshNames[NMESHES] = {"Cube", "Sphere", "Cylinder", "Capsule", "Plane"};
 static GLuint meshBase;
 
 static void buildMeshes() {
     GLUquadric* q = gluNewQuadric();
+    gluQuadricTexture(q, GL_TRUE);
     meshBase = glGenLists(NMESHES);
 
     glNewList(meshBase + MESH_CUBE, GL_COMPILE);
     glBegin(GL_QUADS);
     for (int axis = 0; axis < 3; axis++) {
-        for (int side = -1; side <= 1; side += 2) {  // one face per axis direction
+        static const int uvAxes[3][2] = {{2, 1}, {0, 2}, {0, 1}};  // texture s/t axes per face; side faces keep t = +y
+        for (int side = -1; side <= 1; side += 2) {                // one face per axis direction
             double n[3] = {};
             n[axis] = side;
             glNormal3dv(n);
@@ -114,8 +119,9 @@ static void buildMeshes() {
             for (auto& c : corners) {
                 double p[3];
                 p[axis] = 0.5 * side;
-                p[(axis + 1) % 3] = 0.5 * c[0];
-                p[(axis + 2) % 3] = 0.5 * c[1];
+                p[uvAxes[axis][0]] = 0.5 * c[0];
+                p[uvAxes[axis][1]] = 0.5 * c[1];
+                glTexCoord2d((c[0] + 1) / 2, (c[1] + 1) / 2);
                 glVertex3dv(p);
             }
         }
@@ -123,8 +129,11 @@ static void buildMeshes() {
     glEnd();
     glEndList();
 
-    glNewList(meshBase + MESH_SPHERE, GL_COMPILE);
+    glNewList(meshBase + MESH_SPHERE, GL_COMPILE);  // poles on Y, so textures wrap around the vertical axis
+    glPushMatrix();
+    glRotated(-90, 1, 0, 0);
     gluSphere(q, 0.5, 24, 16);
+    glPopMatrix();
     glEndList();
 
     glNewList(meshBase + MESH_CYLINDER, GL_COMPILE);  // GLU builds along +Z; rotate it to stand on Y
@@ -154,7 +163,10 @@ static void buildMeshes() {
     glNewList(meshBase + MESH_PLANE, GL_COMPILE);
     glBegin(GL_QUADS);
     glNormal3d(0, 1, 0);
-    glVertex3d(-0.5, 0, -0.5); glVertex3d(-0.5, 0, 0.5); glVertex3d(0.5, 0, 0.5); glVertex3d(0.5, 0, -0.5);
+    glTexCoord2d(0, 1); glVertex3d(-0.5, 0, -0.5);
+    glTexCoord2d(0, 0); glVertex3d(-0.5, 0, 0.5);
+    glTexCoord2d(1, 0); glVertex3d(0.5, 0, 0.5);
+    glTexCoord2d(1, 1); glVertex3d(0.5, 0, -0.5);
     glEnd();
     glEndList();
 
@@ -203,25 +215,43 @@ static double textWidth(const std::string& s, double size) {
 struct Image { GLuint tex = 0; int w = 0, h = 0; };
 static std::map<fs::path, Image> images;
 
-// ponytail: BMP only (native LoadImage), magenta = transparent; add stb_image/WIC when PNG with alpha is needed
+// Decodes PNG/JPG/BMP/GIF with WIC (the codecs built into Windows) into 32-bit BGRA, top row first.
+static bool decodeImage(const fs::path& p, int& w, int& h, std::vector<uint32_t>& px) {
+    static IWICImagingFactory* wic = [] {
+        IWICImagingFactory* f = nullptr;
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f));
+        return f;
+    }();
+    IWICBitmapDecoder* dec = nullptr;
+    IWICBitmapFrameDecode* frame = nullptr;
+    IWICFormatConverter* conv = nullptr;
+    UINT uw = 0, uh = 0;
+    bool ok = wic && SUCCEEDED(wic->CreateDecoderFromFilename(p.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &dec)) &&
+              SUCCEEDED(dec->GetFrame(0, &frame)) && SUCCEEDED(wic->CreateFormatConverter(&conv)) &&
+              SUCCEEDED(conv->Initialize(frame, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom)) &&
+              SUCCEEDED(conv->GetSize(&uw, &uh));
+    if (ok) {
+        w = (int)uw;
+        h = (int)uh;
+        px.resize(size_t(w) * h);
+        ok = SUCCEEDED(conv->CopyPixels(nullptr, uw * 4, UINT(px.size() * 4), reinterpret_cast<BYTE*>(px.data())));
+    }
+    if (conv) conv->Release();
+    if (frame) frame->Release();
+    if (dec) dec->Release();
+    return ok;
+}
+
 static const Image& image(const fs::path& p) {
     auto it = images.find(p);
     if (it != images.end()) return it->second;
     Image& img = images[p];  // a failed load stays cached as tex 0
-    HBITMAP bmp = (HBITMAP)LoadImageW(nullptr, p.c_str(), IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION);
-    if (!bmp) return img;
-    BITMAP bm;
-    GetObject(bmp, sizeof bm, &bm);
-    img.w = bm.bmWidth;
-    img.h = bm.bmHeight;
-    BITMAPINFO bi = {};
-    bi.bmiHeader = {sizeof(BITMAPINFOHEADER), img.w, -img.h, 1, 32, BI_RGB};  // 32-bit top-down BGRA
-    std::vector<uint32_t> px(size_t(img.w) * img.h);
-    HDC dc = GetDC(nullptr);
-    GetDIBits(dc, bmp, 0, img.h, px.data(), &bi, DIB_RGB_COLORS);
-    ReleaseDC(nullptr, dc);
-    DeleteObject(bmp);
-    for (auto& c : px) c = (c & 0xFFFFFF) == 0xFF00FF ? 0 : c | 0xFF000000;
+    std::vector<uint32_t> px;
+    if (!decodeImage(p, img.w, img.h, px)) return img;
+    for (int y = 0; y < img.h / 2; y++)  // bottom row first: GL textures (and .obj UVs) start at the bottom
+        std::swap_ranges(px.begin() + size_t(y) * img.w, px.begin() + size_t(y + 1) * img.w, px.end() - size_t(y + 1) * img.w);
+    for (auto& c : px) if ((c & 0xFFFFFF) == 0xFF00FF) c = 0;  // magenta = transparent, for images without alpha
     glGenTextures(1, &img.tex);
     glBindTexture(GL_TEXTURE_2D, img.tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -365,6 +395,55 @@ static int button(Args& a) {
     return b;
 }
 
+static GLuint texture(const fs::path& p) {  // like image(), but a missing texture is an error
+    GLuint t = image(p).tex;
+    if (!t) throw std::runtime_error("imagem não encontrada ou inválida: " + p.filename().u8string());
+    return t;
+}
+
+// .obj models: one display list per material, built on first use and cached.
+struct Model {
+    struct Part { GLuint list, tex; Vec3 color; };
+    std::vector<Part> parts;
+};
+static std::map<fs::path, Model> models;
+
+static const Model& model(const fs::path& p) {
+    if (auto it = models.find(p); it != models.end()) return it->second;
+    fs::path dir = p.parent_path();
+    std::vector<ObjPart> parts;
+    try {
+        parts = parseObj(readFile(p), [&](const std::string& f) { return readFile(dir / fs::u8path(f)); });
+    } catch (const std::exception& e) {
+        throw std::runtime_error(p.filename().u8string() + ": " + e.what());
+    }
+    Model m;
+    for (auto& part : parts) {
+        GLuint list = glGenLists(1);
+        glNewList(list, GL_COMPILE);
+        glBegin(GL_TRIANGLES);
+        for (auto& v : part.tris) {
+            glNormal3d(v.normal.x, v.normal.y, v.normal.z);
+            glTexCoord2d(v.u, v.v);
+            glVertex3d(v.pos.x, v.pos.y, v.pos.z);
+        }
+        glEnd();
+        glEndList();
+        m.parts.push_back({list, part.texture.empty() ? 0 : texture(dir / fs::u8path(part.texture)), part.color});
+    }
+    return models[p] = std::move(m);
+}
+
+static void drawPart(GLuint list, GLuint tex, Vec3 rgb) {  // lit color x texture (GL_MODULATE)
+    glColor3d(rgb.x, rgb.y, rgb.z);
+    if (tex) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, tex);
+    }
+    glCallList(list);
+    if (tex) glDisable(GL_TEXTURE_2D);
+}
+
 static void registerSdk() {
     for (int i = 0; i < NBUTTONS; i++) vm.constants["Button." + std::string(buttonNames[i])] = Value(double(i));
     for (int i = 0; i < NMESHES; i++) vm.constants["Mesh." + std::string(meshNames[i])] = Value(double(i));
@@ -406,10 +485,10 @@ static void registerSdk() {
         glBindTexture(GL_TEXTURE_2D, img.tex);
         glColor3ub(255, 255, 255);
         glBegin(GL_QUADS);
-        glTexCoord2d(0, 0); glVertex2d(x, y);
-        glTexCoord2d(1, 0); glVertex2d(x + w, y);
-        glTexCoord2d(1, 1); glVertex2d(x + w, y + h);
-        glTexCoord2d(0, 1); glVertex2d(x, y + h);
+        glTexCoord2d(0, 1); glVertex2d(x, y);  // screen y grows down, texture t grows up
+        glTexCoord2d(1, 1); glVertex2d(x + w, y);
+        glTexCoord2d(1, 0); glVertex2d(x + w, y + h);
+        glTexCoord2d(0, 0); glVertex2d(x, y + h);
         glEnd();
         glDisable(GL_TEXTURE_2D);
         return Value(true);
@@ -421,9 +500,17 @@ static void registerSdk() {
         mode = -1;
         return Value();
     });
-    vm.addNative("render.mesh", [](Instance&, Args& a) {  // (Mesh.X, position, rotation in degrees, scale, color)
-        int m = (int)argNum(a, 0);
-        if (m < 0 || m >= NMESHES) throw std::runtime_error("mesh inválida");
+    // (Mesh.X or "model.obj", position, rotation in degrees, scale, color, texture = "")
+    // color tints: 0xFFFFFF keeps a model's own colors/textures. texture (optional) replaces the material's.
+    vm.addNative("render.mesh", [](Instance&, Args& a) {
+        const Model* mdl = nullptr;
+        int m = -1;
+        if (auto path = a.empty() ? nullptr : std::get_if<std::string>(&a[0])) {
+            mdl = &model(active->base / fs::u8path(*path));
+        } else {
+            m = (int)argNum(a, 0);
+            if (m < 0 || m >= NMESHES) throw std::runtime_error("mesh inválida");
+        }
         Vec3 p = argVec(a, 1), r = argVec(a, 2), s;
         if (a.size() > 3 && std::holds_alternative<double>(a[3])) {  // a number = uniform scale
             double k = argNum(a, 3);
@@ -431,15 +518,21 @@ static void registerSdk() {
         } else {
             s = argVec(a, 3);
         }
+        int c = (int)argNum(a, 4);
+        Vec3 tint{(c >> 16 & 255) / 255.0, (c >> 8 & 255) / 255.0, (c & 255) / 255.0};
+        GLuint tex = a.size() > 5 && !str(a, 5).empty() ? texture(active->base / fs::u8path(str(a, 5))) : 0;
         mode3D();
-        setColor(argNum(a, 4));
         glPushMatrix();
         glTranslated(p.x, p.y, p.z);
         glRotated(r.y, 0, 1, 0);  // Unity order: Z, then X, then Y
         glRotated(r.x, 1, 0, 0);
         glRotated(r.z, 0, 0, 1);
         glScaled(s.x, s.y, s.z);
-        glCallList(meshBase + m);
+        if (mdl) {
+            for (auto& part : mdl->parts) drawPart(part.list, tex ? tex : part.tex, {tint.x * part.color.x, tint.y * part.color.y, tint.z * part.color.z});
+        } else {
+            drawPart(meshBase + m, tex, tint);
+        }
         glPopMatrix();
         return Value();
     });

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <unordered_map>
 #include "compiler.h"
+#include "obj.h"
 #include "physics.h"
 
 #define CHECK(c) if (!(c)) { printf("FAIL linha %d: %s\n", __LINE__, #c); return 1; }
@@ -143,6 +144,14 @@ int main() {
     *wall->field("size") = Value(Vec3{1, 4, 10});
     for (int i = 0; i < 60; i++) physicsStep(vm, scene, 1.0 / 60);
     CHECK(std::fabs(std::get<Vec3>(*roller->field("position")).x - 3.5) < 0.01);
+
+    // .obj: a quad (with a relative -1 index) fanned into 2 triangles, flat normal, material from the .mtl
+    auto parts = parseObj("mtllib m.mtl\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvt 0 0\nvt 1 1\nusemtl tijolo\nf 1/1 2/1 3/2 -1/2\n",
+                          [](const std::string& f) { return f == "m.mtl" ? "newmtl tijolo\nKd 1 0.5 0\nmap_Kd tijolo.png\n" : ""; });
+    CHECK(parts.size() == 1 && parts[0].tris.size() == 6);
+    CHECK(parts[0].texture == "tijolo.png" && parts[0].color.y == 0.5);
+    CHECK((parts[0].tris[0].normal == Vec3{0, 0, 1}));
+    CHECK((parts[0].tris[5].pos == Vec3{0, 1, 0}) && parts[0].tris[5].u == 1);
 
     puts("doo_test: ok");
     return 0;

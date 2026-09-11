@@ -1,0 +1,11 @@
+object Prop
+
+// Cenário sólido feito de um modelo .obj. O modelo tem origem na base; o colisor fica no centro.
+use BoxCollider
+
+var model = ""
+var rotation = vec3(0, 0, 0)
+
+function draw() {
+    render.mesh(model, position - vec3(0, size.y / 2, 0), rotation, 1, 0xFFFFFF)
+}

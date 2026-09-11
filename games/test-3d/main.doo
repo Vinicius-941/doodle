@@ -7,18 +7,23 @@ var total = 0
 var camy = 1
 
 function create() {
-    block(vec3(0, -0.5, 0), vec3(80, 1, 80), 0x5E9E48)   // chão
+    block(vec3(0, -0.5, 0), vec3(80, 1, 80), 0x5E9E48, "")   // chão
 
-    for (var i = 0; i < 3; i += 1) {                      // escada de caixas: pule de uma pra outra
+    for (var i = 0; i < 3; i += 1) {                          // escada de caixas: pule de uma pra outra
         var h = i + 1
-        block(vec3(5 + i * 2, h / 2, 6), vec3(2, h, 2), 0xC08040)
+        block(vec3(5 + i * 2, h / 2, 6), vec3(2, h, 2), 0xFFFFFF, "caixa.png")
     }
-    coin(vec3(9, 3.8, 6))                                 // prêmio no alto da escada
+    coin(vec3(9, 3.8, 6))                                     // prêmio no alto da escada
 
-    for (var i = 0; i < 12; i += 1) {                     // anel de pilares
+    for (var i = 0; i < 12; i += 1) {                         // anel de pilares
         var a = i * math.pi / 6
-        block(vec3(math.sin(a) * 16, 2, math.cos(a) * 16), vec3(1, 4, 1), 0xC8C0B0)
+        block(vec3(math.sin(a) * 16, 2, math.cos(a) * 16), vec3(1, 4, 1), 0xC8C0B0, "")
     }
+
+    var casa = spawn(Prop, vec3(-7, 1.6, 8))   // modelo .obj texturizado; o colisor vai de y = 0 a 3.2
+    casa.model = "casa.obj"
+    casa.size = vec3(3, 3.2, 3)
+    casa.rotation = vec3(0, 90, 0)             // porta virada para o centro
     for (var i = 0; i < 6; i += 1) {                      // moedas em círculo
         var a = i * math.pi / 3 + 0.5
         coin(vec3(math.sin(a) * 9, 1, math.cos(a) * 9))
@@ -26,10 +31,11 @@ function create() {
     player = spawn(Player, vec3(0, 1, 0))
 }
 
-function block(pos, size, color) {
+function block(pos, size, color, texture) {
     var b = spawn(Block, pos)
     b.size = size
     b.color = color
+    b.texture = texture
 }
 
 function coin(pos) {
