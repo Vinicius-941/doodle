@@ -13,7 +13,7 @@ function update() {
 function on_collision(other) {
     if (type(other) == Player) {
         other.coins += 1
-        audio.play(1320, 90)
+        audio.play("moeda.wav")
         destroy_self()
     }
 }

@@ -1,5 +1,5 @@
 // Doodle simulator: the virtual Doodle hardware as a Windows process.
-// Render = OpenGL, input = keyboard + XInput, audio = PlaySound, plus the SDK natives Doo code calls.
+// Render = OpenGL, input = keyboard + XInput, audio = XAudio2, plus the SDK natives Doo code calls.
 //
 // Doodle pad -> keyboard / XInput pad
 //   D-pad = arrows (left stick too)   A = Z   B = X   X = A   Y = S   L = Q   R = W
@@ -8,8 +8,8 @@
 // Usage: doodle [root]           boot the firmware (root defaults to the source tree)
 //        doodle --check [root]   compile firmware + all games and report errors
 #include <windows.h>
-#include <mmsystem.h>
 #include <Xinput.h>
+#include <xaudio2.h>
 #include <GL/gl.h>
 #include <GL/glu.h>
 #include <wincodec.h>
@@ -25,6 +25,7 @@
 #include "compiler.h"
 #include "obj.h"
 #include "physics.h"
+#include "wav.h"
 
 namespace fs = std::filesystem;
 using Args = std::vector<Value>;
@@ -219,7 +220,6 @@ static std::map<fs::path, Image> images;
 static bool decodeImage(const fs::path& p, int& w, int& h, std::vector<uint32_t>& px) {
     static IWICImagingFactory* wic = [] {
         IWICImagingFactory* f = nullptr;
-        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f));
         return f;
     }();
@@ -261,24 +261,81 @@ static const Image& image(const fs::path& p) {
 }
 
 // ---------- audio ----------
+// XAudio2 (built into Windows) mixes one voice per playing sound. Sample buffers must outlive their voice:
+// files stay cached for good, generated tones are owned by the voice.
 
-static std::vector<unsigned char> wav;
+struct Voice {
+    int id;
+    IXAudio2SourceVoice* v;
+    std::shared_ptr<Wav> tone;      // samples of a generated tone
+    std::weak_ptr<Instance> source; // AudioSource: follows this instance
+    double volume = 1, range = 0;   // range > 0 = positional (fades out with distance to the camera)
+};
+static IXAudio2* xaudio;  // null when there is no audio device: games run muted
+static std::vector<Voice> voices;
+static int nextVoiceId = 1;
 
-// ponytail: PlaySound = one sound at a time (a new one cuts the last); move to a waveOut/XAudio2 mixer for overlapping sounds
-static void tone(double freq, double ms) {
-    PlaySoundW(nullptr, nullptr, 0);  // stop before reusing the buffer
-    const int rate = 22050, n = std::max(1, int(rate * ms / 1000));
-    wav.assign(44 + n, 0);
-    auto put = [](unsigned char* p, uint32_t v, int bytes) { memcpy(p, &v, bytes); };
-    memcpy(&wav[0], "RIFF", 4); put(&wav[4], 36 + n, 4); memcpy(&wav[8], "WAVEfmt ", 8);
-    put(&wav[16], 16, 4); put(&wav[20], 1, 2); put(&wav[22], 1, 2);           // PCM, mono
-    put(&wav[24], rate, 4); put(&wav[28], rate, 4); put(&wav[32], 1, 2); put(&wav[34], 8, 2);  // 8-bit
-    memcpy(&wav[36], "data", 4); put(&wav[40], n, 4);
-    for (int i = 0; i < n; i++) {  // square wave with a linear fade-out so notes don't click
-        double env = 1.0 - double(i) / n;
-        wav[44 + i] = (unsigned char)(128 + (std::fmod(i * freq / rate, 1.0) < 0.5 ? 40 : -40) * env);
+static void initAudio() {
+    IXAudio2MasteringVoice* master = nullptr;
+    if (FAILED(XAudio2Create(&xaudio, 0, XAUDIO2_DEFAULT_PROCESSOR)) || FAILED(xaudio->CreateMasteringVoice(&master))) {
+        xaudio = nullptr;
+        fprintf(stderr, "aviso: nenhum dispositivo de áudio, os jogos vão rodar mudos\n");
     }
-    PlaySoundW((LPCWSTR)wav.data(), nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
+}
+
+static Voice* playWav(const Wav& w, double volume, bool loop) {  // nullptr when muted
+    if (!xaudio) return nullptr;
+    IXAudio2SourceVoice* v = nullptr;
+    if (FAILED(xaudio->CreateSourceVoice(&v, reinterpret_cast<const WAVEFORMATEX*>(w.format.data()))))
+        throw std::runtime_error("formato de WAV não suportado (use PCM de 8 ou 16 bits)");
+    XAUDIO2_BUFFER buf = {};
+    buf.AudioBytes = (UINT32)w.data.size();
+    buf.pAudioData = w.data.data();
+    buf.Flags = XAUDIO2_END_OF_STREAM;
+    if (loop) buf.LoopCount = XAUDIO2_LOOP_INFINITE;
+    v->SubmitSourceBuffer(&buf);
+    v->SetVolume((float)volume);
+    v->Start();
+    voices.push_back({nextVoiceId++, v});
+    voices.back().volume = volume;
+    return &voices.back();
+}
+
+static std::shared_ptr<Wav> makeTone(double freq, double ms) {  // square wave with a linear fade-out (no clicks)
+    const int rate = 22050, n = std::max(1, int(rate * ms / 1000));
+    WAVEFORMATEX fmt = {WAVE_FORMAT_PCM, 1, rate, rate * 2, 2, 16, 0};
+    auto w = std::make_shared<Wav>();
+    w->format.assign(reinterpret_cast<uint8_t*>(&fmt), reinterpret_cast<uint8_t*>(&fmt) + sizeof fmt);
+    w->data.resize(size_t(n) * 2);
+    auto s = reinterpret_cast<int16_t*>(w->data.data());
+    for (int i = 0; i < n; i++) s[i] = int16_t((std::fmod(i * freq / rate, 1.0) < 0.5 ? 9000 : -9000) * (1.0 - double(i) / n));
+    return w;
+}
+
+template <class Match>
+static void stopVoices(Match match) {
+    for (size_t i = 0; i < voices.size();) {
+        if (!match(voices[i])) { i++; continue; }
+        voices[i].v->DestroyVoice();
+        voices.erase(voices.begin() + i);
+    }
+}
+
+// Once per frame: drop finished voices; positional ones follow their instance and fade with distance.
+// ponytail: volume only, no stereo panning; use X3DAudio when direction matters
+static void updateAudio() {
+    stopVoices([](Voice& vc) {
+        XAUDIO2_VOICE_STATE st;
+        vc.v->GetState(&st, XAUDIO2_VOICE_NOSAMPLESPLAYED);
+        if (st.BuffersQueued == 0) return true;
+        if (vc.range <= 0) return false;
+        auto inst = vc.source.lock();
+        Value* p = inst && inst->alive ? inst->field("position") : nullptr;
+        if (!p || !std::holds_alternative<Vec3>(*p)) return true;  // the source is gone
+        Vec3 d = std::get<Vec3>(*p) - cam.pos;
+        vc.v->SetVolume(float(vc.volume * std::max(0.0, 1 - std::sqrt(d.dot(d)) / vc.range)));
+        return false;
+    });
 }
 
 // ---------- input ----------
@@ -363,12 +420,18 @@ static void unload(Program& prog) {  // destroy() on everything still alive, the
     for (auto& inst : scene) if (inst->alive) vm.call(*inst, "destroy");
 }
 
+static void stopAllSounds() {
+    stopVoices([](const Voice&) { return true; });
+}
+
 static void bootFirmware() {
+    stopAllSounds();
     game = Program{};
     load(firmware, "firmware", root, true);
 }
 
-static void backToFirmware() {
+static void backToFirmware() {  // a game's sounds (music loops included) end with it
+    stopAllSounds();
     game = Program{};
     active = &firmware;
 }
@@ -393,6 +456,18 @@ static int button(Args& a) {
     int b = (int)argNum(a, 0);
     if (b < 0 || b >= NBUTTONS) throw std::runtime_error("botão inválido");
     return b;
+}
+
+static std::map<fs::path, Wav> sounds;  // never evicted: playing voices point into these buffers
+
+static const Wav& sound(const std::string& file) {
+    fs::path p = active->base / fs::u8path(file);
+    if (auto it = sounds.find(p); it != sounds.end()) return it->second;
+    try {
+        return sounds[p] = parseWav(readFile(p));
+    } catch (const std::exception& e) {
+        throw std::runtime_error(file + ": " + e.what());
+    }
 }
 
 static GLuint texture(const fs::path& p) {  // like image(), but a missing texture is an error
@@ -540,8 +615,49 @@ static void registerSdk() {
     vm.addNative("input.pressed", [](Instance&, Args& a) { return Value(held[button(a)]); });  // held down
     vm.addNative("input.just_pressed", [](Instance&, Args& a) { return Value(justPressed(button(a))); });
 
-    vm.addNative("audio.play", [](Instance&, Args& a) { tone(argNum(a, 0), argNum(a, 1)); return Value(); });  // (Hz, ms)
-    vm.addNative("audio.stop", [](Instance&, Args&) { PlaySoundW(nullptr, nullptr, 0); return Value(); });
+    // audio.play(Hz, ms) = tone; audio.play("file.wav", volume = 1) = sample. Both return an id for audio.stop(id).
+    vm.addNative("audio.play", [](Instance&, Args& a) {
+        Voice* v;
+        if (!a.empty() && std::holds_alternative<double>(a[0])) {
+            auto t = makeTone(argNum(a, 0), argNum(a, 1));
+            if ((v = playWav(*t, 1, false))) v->tone = t;
+        } else {
+            v = playWav(sound(str(a, 0)), a.size() > 1 ? argNum(a, 1) : 1, false);
+        }
+        return Value(double(v ? v->id : 0));
+    });
+    vm.addNative("audio.loop", [](Instance&, Args& a) {  // ("music.wav", volume = 1) -> id; plays until stopped
+        Voice* v = playWav(sound(str(a, 0)), a.size() > 1 ? argNum(a, 1) : 1, true);
+        return Value(double(v ? v->id : 0));
+    });
+    vm.addNative("audio.stop", [](Instance&, Args& a) {  // (id) stops that sound; () stops everything
+        int id = a.empty() ? 0 : (int)argNum(a, 0);
+        stopVoices([&](const Voice& v) { return !id || v.id == id; });
+        return Value();
+    });
+
+    // use AudioSource: the object's `sound` plays at its `position` and fades out at `range` from the camera
+    vm.components["AudioSource"] = {{"position", Value(Vec3{})}, {"sound", Value(std::string())}, {"volume", Value(1.0)},
+                                    {"loop", Value(false)}, {"range", Value(20.0)}};
+    vm.addNative("audio.source_play", [](Instance& self, Args&) {
+        auto& uses = self.def->uses;
+        if (std::find(uses.begin(), uses.end(), "AudioSource") == uses.end())
+            throw std::runtime_error("audio.source_play() precisa de `use AudioSource` no objeto");
+        auto num = [&](const char* f) {
+            if (auto d = std::get_if<double>(self.field(f))) return *d;
+            throw std::runtime_error(std::string("'") + f + "' precisa ser um número");
+        };
+        Voice* v = playWav(sound(toString(*self.field("sound"))), 0, truthy(*self.field("loop")));  // volume set by updateAudio
+        if (!v) return Value(0.0);
+        v->source = self.weak_from_this();
+        v->volume = num("volume");
+        v->range = std::max(0.001, num("range"));
+        return Value(double(v->id));
+    });
+    vm.addNative("audio.source_stop", [](Instance& self, Args&) {
+        stopVoices([&](const Voice& v) { return v.source.lock().get() == &self; });
+        return Value();
+    });
 
     vm.addNative("time.delta", [](Instance&, Args&) { return Value(dt); });
 
@@ -675,6 +791,8 @@ int main(int argc, char** argv) {
     if (!wglUseFontOutlinesW(dc, 32, 224, fontBase + 32, 0, 0, WGL_FONT_POLYGONS, glyphs + 32))
         fprintf(stderr, "aviso: fonte não carregou, textos não vão aparecer\n");
 
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);  // WIC (images) is COM
+    initAudio();
     guarded(bootFirmware);
     auto last = std::chrono::steady_clock::now();
     for (;;) {
@@ -701,6 +819,7 @@ int main(int argc, char** argv) {
         glEnable(GL_SCISSOR_TEST);
         pollInput();
         frame();
+        updateAudio();
         SwapBuffers(dc);
     }
 }

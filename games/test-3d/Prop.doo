@@ -1,10 +1,16 @@
 object Prop
 
 // Cenário sólido feito de um modelo .obj. O modelo tem origem na base; o colisor fica no centro.
+// Com `sound`, vira também uma fonte de som no mundo (mais alto quanto mais perto da câmera).
 use BoxCollider
+use AudioSource
 
 var model = ""
 var rotation = vec3(0, 0, 0)
+
+function tocar() {
+    audio.source_play()
+}
 
 function draw() {
     render.mesh(model, position - vec3(0, size.y / 2, 0), rotation, 1, 0xFFFFFF)

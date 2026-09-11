@@ -21,7 +21,7 @@ function update() {
 
     if (input.just_pressed(Button.A) && grounded) {
         velocity.y = 7
-        audio.play(330, 80)
+        audio.play("pulo.wav")
     }
     if (position.y < -20) {   // caiu pra fora do mapa
         position = vec3(0, 2, 0)

@@ -24,6 +24,10 @@ function create() {
     casa.model = "casa.obj"
     casa.size = vec3(3, 3.2, 3)
     casa.rotation = vec3(0, 90, 0)             // porta virada para o centro
+    casa.sound = "musica.wav"                  // rádio tocando dentro da casa: chegue perto pra ouvir
+    casa.loop = true
+    casa.range = 22
+    casa.tocar()
     for (var i = 0; i < 6; i += 1) {                      // moedas em círculo
         var a = i * math.pi / 3 + 0.5
         coin(vec3(math.sin(a) * 9, 1, math.cos(a) * 9))

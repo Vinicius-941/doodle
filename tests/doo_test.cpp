@@ -5,6 +5,7 @@
 #include "compiler.h"
 #include "obj.h"
 #include "physics.h"
+#include "wav.h"
 
 #define CHECK(c) if (!(c)) { printf("FAIL linha %d: %s\n", __LINE__, #c); return 1; }
 
@@ -152,6 +153,13 @@ int main() {
     CHECK(parts[0].texture == "tijolo.png" && parts[0].color.y == 0.5);
     CHECK((parts[0].tris[0].normal == Vec3{0, 0, 1}));
     CHECK((parts[0].tris[5].pos == Vec3{0, 1, 0}) && parts[0].tris[5].u == 1);
+
+    // .wav: a 16-byte PCM fmt, then an odd-sized chunk (padded to even) before the data
+    auto le32 = [](uint32_t v) { return std::string(reinterpret_cast<const char*>(&v), 4); };
+    Wav w = parseWav("RIFF" + le32(0) + "WAVE" + "fmt " + le32(16) + std::string(16, '\x01') + "LIST" + le32(3) + "abc" +
+                     '\0' + "data" + le32(4) + "wxyz");
+    CHECK(w.format.size() == 18 && w.format[17] == 0 && w.format[0] == 1);
+    CHECK(std::string(w.data.begin(), w.data.end()) == "wxyz");
 
     puts("doo_test: ok");
     return 0;

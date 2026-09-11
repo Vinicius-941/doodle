@@ -62,7 +62,7 @@ struct ObjectDef {
     std::unordered_map<std::string, int> funcIndex;
 };
 
-struct Instance {
+struct Instance : std::enable_shared_from_this<Instance> {  // always created by make_shared (VM::instantiate)
     std::shared_ptr<ObjectDef> def;
     std::vector<Value> fields;
     bool alive = true;
