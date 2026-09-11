@@ -1,0 +1,15 @@
+object Text extends UIElement
+
+// Texto na tela. align = "center" centraliza dentro da largura w.
+
+var text = ""
+var size = 20
+var align = "left"
+
+function paint(focused, t) {
+    var tx = x
+    if (align == "center") {
+        tx = x + (w - render.text_width(text, size)) / 2
+    }
+    render.text(tx, y, text, size, color, alpha)
+}

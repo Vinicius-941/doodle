@@ -1,0 +1,11 @@
+object Image extends UIElement
+
+// Imagem (PNG, JPG, BMP) ou, sem `path`, um retângulo da cor `color`: serve de painel de fundo.
+
+var path = ""
+
+function paint(focused, t) {
+    if (path == "" || !render.image(path, x, y, w, h, alpha)) {
+        render.rect(x, y, w, h, color, alpha)
+    }
+}

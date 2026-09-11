@@ -14,6 +14,7 @@ var turn_speed = 140       // graus por segundo
 var jump_speed = 7
 var jump_sound = ""        // .wav opcional ao pular
 var color = 0xF2F2F2
+var controllable = true    // false: ignora o controle (menus, cenas)
 var follow_camera = true   // câmera atrás do personagem
 var camera_distance = 7
 var camera_height = 3
@@ -24,7 +25,9 @@ function create() {
 }
 
 function update() {
-    control()
+    if (controllable) {
+        control()
+    }
     if (follow_camera) {
         camera()
     }

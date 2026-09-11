@@ -118,6 +118,11 @@ static bool throws(const char* code, const VM& vm, const char* expectedPrefix) {
     return false;
 }
 
+static std::string readPrefab(const std::string& name) {  // the real SDK prefab sources
+    std::ifstream f(std::string(DOODLE_ROOT "/sdk/prefabs/") + name + ".doo", std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), {}};
+}
+
 static bool throwsAll(const std::vector<SourceFile>& files, const std::vector<SourceFile>& library, const VM& vm, const char* prefix) {
     try { compileAll(files, vm, false, library); }
     catch (const DooError& e) { return std::string(e.what()).rfind(prefix, 0) == 0; }
@@ -137,7 +142,9 @@ int main() {
         vm.call(*inst, "create");
         return inst;
     };
-    vm.addNative("spawn", [&](Instance&, std::vector<Value>& a) { return Value(Ref{spawn(std::get<std::string>(a[0]), argVec(a, 1))}); });
+    vm.addNative("spawn", [&](Instance&, std::vector<Value>& a) {
+        return Value(Ref{spawn(std::get<std::string>(a[0]), a.size() > 1 ? argVec(a, 1) : Vec3{})});
+    });
 
     auto t = vm.instantiate(compile(src, "t.doo", vm, false));
     vm.call(*t, "create");
@@ -183,8 +190,7 @@ int main() {
     vm.constants["Mesh.Cube"] = Value(0.0);
     vm.addNative("render.mesh", [&](Instance&, std::vector<Value>&) { meshes++; return Value(); });
     vm.addNative("time.delta", [](Instance&, std::vector<Value>&) { return Value(0.1); });
-    std::ifstream pf(DOODLE_ROOT "/sdk/prefabs/ParticleSystem.doo", std::ios::binary);
-    auto fx = vm.instantiate(compile({std::istreambuf_iterator<char>(pf), {}}, "ParticleSystem.doo", vm, false));
+    auto fx = vm.instantiate(compile(readPrefab("ParticleSystem"), "ParticleSystem.doo", vm, false));
     vm.call(*fx, "create");
     vm.call(*fx, "burst", {Value(16.0)});
     vm.call(*fx, "update");
@@ -192,6 +198,36 @@ int main() {
     CHECK(meshes == 16 && fx->alive);
     for (int i = 0; i < 9; i++) vm.call(*fx, "update");  // past the 0.8 s lifetime
     CHECK(!fx->alive);                                   // auto_destroy
+
+    // SDK UI prefabs (real files): the Canvas moves focus spatially, A clicks, left/right adjust a slider
+    int pressed = -1;
+    const char* buttons[] = {"Button.Up", "Button.Down", "Button.Left", "Button.Right", "Button.A"};
+    for (int i = 0; i < 5; i++) vm.constants[buttons[i]] = Value(double(i));
+    vm.addNative("input.just_pressed", [&](Instance&, std::vector<Value>& a) { return Value((int)argNum(a, 0) == pressed); });
+    for (const char* n : {"render.text", "render.rect", "audio.play"}) vm.addNative(n, [](Instance&, std::vector<Value>&) { return Value(); });
+    vm.addNative("render.text_width", [](Instance&, std::vector<Value>&) { return Value(0.0); });
+    vm.addNative("render.image", [](Instance&, std::vector<Value>&) { return Value(false); });
+    vm.addNative("time.unscaled_delta", [](Instance&, std::vector<Value>&) { return Value(0.016); });
+    std::vector<SourceFile> ui;
+    for (const char* n : {"UIElement", "Text", "Image", "Button", "Slider", "Canvas"}) ui.push_back({n, readPrefab(n)});
+    const char* uiTest = "object UITest\nvar menu\nvar b1\nvar b2\nvar s\nfunction create() {\n menu = spawn(Canvas)\n"
+                         " b1 = menu.button(\"Um\", 100, 100, 200, 40)\n b2 = menu.button(\"Dois\", 100, 160, 200, 40)\n"
+                         " s = menu.slider(\"Vol\", 100, 220, 200, 0, 100, 50)\n}";
+    for (auto& d : compileAll({{"ui.doo", uiTest}}, vm, false, ui)) defs[d->name] = d;
+    auto ut = spawn("UITest", {});
+    auto canvas = std::get<Ref>(*ut->field("menu")).p.lock();
+    auto step = [&](int button) { pressed = button; vm.call(*canvas, "update"); };
+    auto uiField = [&](const char* ref, const char* f) { return *std::get<Ref>(*ut->field(ref)).p.lock()->field(f); };
+    step(-1);          // nothing pressed: focus goes to the first button
+    CHECK(std::get<double>(*canvas->field("focus")) == 0);
+    step(1);           // down, down: the slider
+    step(1);
+    CHECK(std::get<double>(*canvas->field("focus")) == 2);
+    step(3);           // right on the slider: 50 -> 60
+    CHECK(std::get<double>(uiField("s", "value")) == 60 && std::get<bool>(uiField("s", "changed")));
+    step(0);           // up to "Dois", then A
+    step(4);
+    CHECK(std::get<bool>(uiField("b2", "clicked")) && !std::get<bool>(uiField("b1", "clicked")));
 
     for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc}, vm, false)) defs[d->name] = d;
     auto level = spawn("Level", {});

@@ -1,0 +1,45 @@
+object Slider extends UIElement
+
+// Barra de valor: com o foco, esquerda/direita mudam `value` entre min e max, de `step` em `step`.
+// No seu update, leia `changed` (vale um quadro).
+
+var label = ""
+var value = 50
+var min = 0
+var max = 100
+var step = 10
+var size = 18
+var background = 0x101828
+var changed = false
+
+function focusable() { return visible }
+
+function adjust(d) {
+    var v = math.max(min, math.min(max, value + d * step))
+    changed = v != value
+    value = v
+    return true
+}
+
+function reset() {
+    changed = false
+}
+
+function paint(focused, t) {
+    var bg = background
+    var a = 0.8 * alpha
+    if (focused) {
+        bg = accent
+        a = (0.8 + 0.2 * math.sin(t * 5)) * alpha
+    }
+    render.rect(x, y, w, h, bg, a)
+    render.text(x + 12, y + (h - size) / 2 - 2, label, size, color, alpha)
+    var tx = x + w * 0.42   // trilho
+    var tw = w * 0.4
+    var k = (value - min) / (max - min)
+    render.rect(tx, y + h / 2 - 3, tw, 6, 0xFFFFFF, 0.25 * alpha)
+    render.rect(tx, y + h / 2 - 3, tw * k, 6, 0xFFFFFF, 0.9 * alpha)
+    render.rect(tx + tw * k - 5, y + h / 2 - 10, 10, 20, 0xFFFFFF, alpha)
+    var s = "" + value
+    render.text(x + w - 12 - render.text_width(s, size), y + (h - size) / 2 - 2, s, size, color, alpha)
+}

@@ -1,0 +1,20 @@
+object UIElement
+
+// Base dos elementos de UI do SDK (Text, Image, Button, Slider). Posição e tamanho em pixels da tela (640 x 480).
+// Quem desenha e cuida do foco é o Canvas: o elemento só sabe se pintar e reagir ao controle.
+
+var x = 0
+var y = 0
+var w = 100
+var h = 40
+var visible = true
+var alpha = 1
+var color = 0xFFFFFF
+var accent = 0x3A7BFF   // cor de destaque quando está com o foco (o Canvas passa a dele)
+
+function paint(focused, t) {}
+function focusable() { return false }
+function activate() { return false }   // A apertado com o foco aqui; true = usou o botão
+function adjust(d) { return false }    // esquerda (-1) / direita (+1); true = usou, não move o foco
+function reset() {}                    // começo do quadro: apaga clicked/changed
+function remove() { destroy_self() }

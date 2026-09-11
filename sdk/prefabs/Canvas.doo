@@ -1,0 +1,164 @@
+object Canvas
+
+// Tela de UI do SDK: agrupa elementos, desenha na ordem em que foram criados (sempre por cima do 3D)
+// e cuida do foco pelo controle: o direcional leva o foco ao vizinho naquela direção, A aperta botões,
+// esquerda/direita ajustam sliders.
+//     var menu = spawn(Canvas)
+//     var jogar = menu.button("Jogar", 220, 200, 200, 44)
+//     ...no update:  if (jogar.clicked) { ... }
+// visible = false esconde tudo; active = false desliga o controle (bom para HUD).
+
+var items = []
+var focus = -1       // índice em items do elemento com o foco
+var visible = true
+var active = true
+var sounds = true    // bipes de navegação
+var accent = 0x3A7BFF
+var t = 0
+
+// ---------- criar elementos ----------
+
+function add(e) {    // qualquer UIElement (inclusive os seus, que estendem UIElement)
+    e.accent = accent
+    push(items, e)
+    return e
+}
+
+function text(s, x, y, size) {
+    var e = add(spawn(Text))
+    e.text = s
+    e.x = x
+    e.y = y
+    e.size = size
+    return e
+}
+
+function image(path, x, y, w, h) {   // path "" = retângulo da cor do elemento
+    var e = add(spawn(Image))
+    e.path = path
+    e.x = x
+    e.y = y
+    e.w = w
+    e.h = h
+    return e
+}
+
+function button(label, x, y, w, h) {
+    var e = add(spawn(Button))
+    e.text = label
+    e.x = x
+    e.y = y
+    e.w = w
+    e.h = h
+    return e
+}
+
+function slider(label, x, y, w, min, max, value) {
+    var e = add(spawn(Slider))
+    e.label = label
+    e.x = x
+    e.y = y
+    e.w = w
+    e.h = 44
+    e.min = min
+    e.max = max
+    e.value = value
+    return e
+}
+
+function focus_on(e) {
+    for (var i = 0; i < len(items); i += 1) {
+        if (items[i] == e) { focus = i }
+    }
+}
+
+// ---------- controle ----------
+
+function update() {
+    t += time.unscaled_delta   // a UI continua animando com o jogo pausado
+    for (var i = 0; i < len(items); i += 1) {
+        items[i].reset()
+    }
+    if (!active || !visible) {
+        return
+    }
+    if (focus < 0 || !items[focus].focusable()) {
+        focus = first()
+    }
+    if (focus < 0) {
+        return
+    }
+    var e = items[focus]
+    var d = 0
+    if (input.just_pressed(Button.Left)) { d = -1 }
+    if (input.just_pressed(Button.Right)) { d = 1 }
+    if (d != 0) {
+        if (e.adjust(d)) {
+            som(660)
+        } else {
+            mover(d, 0)
+        }
+    }
+    if (input.just_pressed(Button.Up)) { mover(0, -1) }
+    if (input.just_pressed(Button.Down)) { mover(0, 1) }
+    if (input.just_pressed(Button.A) && e.activate()) {
+        som(988)
+    }
+}
+
+function first() {
+    for (var i = 0; i < len(items); i += 1) {
+        if (items[i].focusable()) { return i }
+    }
+    return -1
+}
+
+// Foco para o elemento mais perto na direção (dx, dy), preferindo os alinhados com o atual.
+function mover(dx, dy) {
+    var atual = items[focus]
+    var cx = atual.x + atual.w / 2
+    var cy = atual.y + atual.h / 2
+    var best = -1
+    var bestScore = 0
+    for (var i = 0; i < len(items); i += 1) {
+        var e = items[i]
+        if (i != focus && e.focusable()) {
+            var ex = e.x + e.w / 2 - cx
+            var ey = e.y + e.h / 2 - cy
+            var along = ex * dx + ey * dy
+            if (along > 1) {
+                var score = along + math.abs(ex * dy - ey * dx) * 2
+                if (best < 0 || score < bestScore) {
+                    best = i
+                    bestScore = score
+                }
+            }
+        }
+    }
+    if (best >= 0) {
+        focus = best
+        som(660)
+    }
+}
+
+function som(hz) {
+    if (sounds) { audio.play(hz, 35) }
+}
+
+// ---------- desenho ----------
+
+function draw() {
+    if (!visible) {
+        return
+    }
+    for (var i = 0; i < len(items); i += 1) {
+        var e = items[i]
+        if (e.visible) { e.paint(i == focus && active, t) }
+    }
+}
+
+function destroy() {   // os elementos vão junto
+    for (var i = 0; i < len(items); i += 1) {
+        if (items[i]) { items[i].remove() }
+    }
+}

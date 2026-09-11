@@ -56,7 +56,8 @@ static Program firmware, game;
 static Program* active = &firmware;
 static std::string crash, pendingLaunch;
 static bool keyDown[256], held[NBUTTONS], was[NBUTTONS];
-static double dt = 0;
+static double dt = 0;         // real seconds since the last frame
+static double timeScale = 1;  // games pause with time.set_scale(0); UI keeps going on time.unscaled_delta
 static GLuint fontBase;
 static GLYPHMETRICSFLOAT glyphs[256];
 
@@ -563,6 +564,8 @@ static void updateAudio() {
         Value* p = inst && inst->alive ? inst->field("position") : nullptr;
         if (!p || !std::holds_alternative<Vec3>(*p)) return true;  // the source is gone
         Vec3 d = std::get<Vec3>(*p) - cam.pos;
+        Value* vol = inst->field("volume");  // read live, so the game can change it while playing
+        if (vol && std::holds_alternative<double>(*vol)) vc.volume = std::get<double>(*vol);
         vc.v->SetVolume(float(vc.volume * std::max(0.0, 1 - std::sqrt(d.dot(d)) / vc.range)));
         return false;
     });
@@ -646,7 +649,8 @@ static void load(Program& prog, const std::string& id, const std::string& dir, c
     prog.id = id;
     prog.base = base;
     active = &prog;
-    cam = {};  // each program starts with the default camera
+    cam = {};  // each program starts with the default camera, and unpaused
+    timeScale = 1;
     mode = -1;
     auto defs = compileAll(sources(dir), vm, privileged, prefabs());
     for (auto& d : defs) prog.objects[d->name] = d;
@@ -669,8 +673,9 @@ static void bootFirmware() {
     load(firmware, "sistema", "firmware", root, true);
 }
 
-static void backToFirmware() {  // a game's sounds (music loops included) end with it
+static void backToFirmware() {  // a game's sounds (music loops included) and pause end with it
     stopAllSounds();
+    timeScale = 1;
     game = Program{};
     active = &firmware;
 }
@@ -969,7 +974,13 @@ static void registerSdk() {
         return Value();
     });
 
-    vm.addNative("time.delta", [](Instance&, Args&) { return Value(dt); });
+    vm.addNative("time.delta", [](Instance&, Args&) { return Value(dt * timeScale); });
+    vm.addNative("time.unscaled_delta", [](Instance&, Args&) { return Value(dt); });  // ignores pause (for UI)
+    vm.addNative("time.scale", [](Instance&, Args&) { return Value(timeScale); });
+    vm.addNative("time.set_scale", [](Instance&, Args& a) {  // 0 = paused, 1 = normal, 0.5 = slow motion
+        timeScale = std::max(0.0, argNum(a, 0));
+        return Value();
+    });
     auto now = [](const char* format) {  // local wall clock through strftime
         time_t t = time(nullptr);
         tm local;
@@ -1058,7 +1069,7 @@ static void frame() {
         auto& scene = active->scene;
         if (scene.empty()) return;
         for (size_t i = 0; i < scene.size(); i++) if (scene[i]->alive) vm.call(*scene[i], "update");
-        physicsStep(vm, scene, dt);
+        physicsStep(vm, scene, dt * timeScale);
         for (size_t i = 0; i < scene.size(); i++) if (scene[i]->alive) vm.call(*scene[i], "draw");
         for (size_t i = 0; i < scene.size(); i++) if (!scene[i]->alive) vm.call(*scene[i], "destroy");
         if (!scene[0]->alive) {  // the root destroyed itself: a game exits to the menu, the firmware powers off
