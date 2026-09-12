@@ -116,54 +116,54 @@ function bloco(pos, tam, cor, textura) {
 function interface() {
     hud = instance_create(Canvas)
     hud.active = false
-    hFase = hud.text("", 20, 14, 17)
-    hMoedas = hud.text("", 20, 36, 26)
-    hPontos = centrado(hud, "", 16, 24)
-    hTempo = hud.text("", 545, 14, 30)
+    hFase = hud.text("", 8, 6, 10)
+    hMoedas = hud.text("", 8, 18, 14)
+    hPontos = centrado(hud, "", 6, 13)
+    hTempo = hud.text("", 276, 6, 15)
     for (var i = 0; i < 3; i += 1) {
-        array_push(coracoes, hud.image("coracao.png", 545 + i * 28, 52, 24, 24))
+        array_push(coracoes, hud.image("coracao.png", 276 + i * 14, 26, 12, 12))
     }
-    faixa = centrado(hud, "", 190, 40)
+    faixa = centrado(hud, "", 74, 20)
     faixa.color = 0xFFE070
 
     titulo = instance_create(Canvas)
     escurecer(titulo, 0.35)
-    centrado(titulo, "Vale das Moedas", 66, 58)
-    centrado(titulo, "Pegue as moedas antes do tempo acabar. Pule nas bolotas!", 150, 18)
-    bJogar = titulo.button("Jogar", 210, 220, 220, 46)
-    bSairTitulo = titulo.button("Sair", 210, 276, 220, 46)
-    tRecorde = centrado(titulo, "", 350, 20)
-    centrado(titulo, "Setas: andar e girar      Z: pular      Enter: pausa", 430, 15)
+    centrado(titulo, "Vale das Moedas", 22, 26)
+    centrado(titulo, "Pegue as moedas. Pule nas bolotas!", 54, 10)
+    bJogar = titulo.button("Jogar", 110, 78, 100, 20)
+    bSairTitulo = titulo.button("Sair", 110, 102, 100, 20)
+    tRecorde = centrado(titulo, "", 130, 10)
+    centrado(titulo, "Setas: andar   Z: pular   Enter: pausa", 166, 10)
 
     pausa = instance_create(Canvas)
     escurecer(pausa, 0.6)
-    centrado(pausa, "Pausa", 96, 44)
-    bContinuar = pausa.button("Continuar", 180, 170, 280, 44)
-    bPs1 = pausa.button("", 180, 222, 280, 44)
-    sMusica = pausa.slider("Música", 180, 274, 280, 0, 100, 100)
-    bTitulo = pausa.button("Voltar ao título", 180, 326, 280, 44)
-    bSair = pausa.button("Sair do jogo", 180, 378, 280, 44)
+    centrado(pausa, "Pausa", 20, 20)
+    bContinuar = pausa.button("Continuar", 90, 46, 140, 19)
+    bPs1 = pausa.button("", 90, 69, 140, 19)
+    sMusica = pausa.slider("Música", 90, 92, 140, 0, 100, 100)
+    bTitulo = pausa.button("Voltar ao título", 90, 115, 140, 19)
+    bSair = pausa.button("Sair do jogo", 90, 138, 140, 19)
 
     fim = instance_create(Canvas)
     escurecer(fim, 0.65)
-    tFim = centrado(fim, "", 90, 48)
-    tMotivo = centrado(fim, "", 158, 20)
-    tPontos = centrado(fim, "", 200, 30)
-    tRecordeFim = centrado(fim, "", 246, 20)
+    tFim = centrado(fim, "", 24, 22)
+    tMotivo = centrado(fim, "", 52, 10)
+    tPontos = centrado(fim, "", 68, 15)
+    tRecordeFim = centrado(fim, "", 90, 10)
     tRecordeFim.color = 0xFFE070
-    bDeNovo = fim.button("Jogar de novo", 210, 310, 220, 46)
-    bVoltar = fim.button("Voltar ao título", 210, 366, 220, 46)
+    bDeNovo = fim.button("Jogar de novo", 110, 112, 100, 20)
+    bVoltar = fim.button("Voltar ao título", 110, 138, 100, 20)
 }
 
 function centrado(canvas, s, y, tamanho) {
     var t = canvas.text(s, 0, y, tamanho)
-    t.w = 640
+    t.w = 320
     t.align = "center"
     return t
 }
 
 function escurecer(canvas, a) {   // painel escuro por cima do jogo
-    var e = canvas.image("", 0, 0, 640, 480)
+    var e = canvas.image("", 0, 0, 320, 180)
     e.color = 0x000000
     e.alpha = a
 }

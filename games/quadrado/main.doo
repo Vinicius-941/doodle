@@ -1,10 +1,11 @@
 object Quadrado
 
 // Prova de conceito: um quadrado que se move com o direcional.
+// A tela do console tem 320 x 180 pixels; a tela cheia é isto aqui.
 
-var x = 300
-var y = 220
-var speed = 240
+var x = 150
+var y = 80
+var speed = 120
 var colors = [0xFFCC00, 0x40E0D0, 0xFF5080]
 var ci = 0
 
@@ -18,8 +19,8 @@ function step() {
     if (button_check(btn_left))  { x -= speed * delta_time }
     if (button_check(btn_down))  { y += speed * delta_time }
     if (button_check(btn_up))    { y -= speed * delta_time }
-    x = clamp(x, 0, 640 - 40)
-    y = clamp(y, 0, 480 - 40)
+    x = clamp(x, 0, 320 - 20)
+    y = clamp(y, 0, 180 - 20)
 
     if (button_check_pressed(btn_a)) {
         ci = (ci + 1) % array_length(colors)
@@ -31,9 +32,9 @@ function step() {
     }
 
     draw_clear(0x101820)
-    draw_rectangle(x, y, 40, 40, colors[ci])
-    draw_text(20, 16, "Quadrado", 26, 0xFFFFFF)
-    draw_text(20, 448, "Setas: mover    Z: cor    X: sair    Esc: HOME", 15, 0x8090A0)
+    draw_rectangle(x, y, 20, 20, colors[ci])
+    draw_text(10, 8, "Quadrado", 14, 0xFFFFFF)
+    draw_text(10, 166, "Setas: mover  Z: cor  X: sair", 10, 0x8090A0)
 }
 
 function destroy() {

@@ -38,7 +38,9 @@
 namespace fs = std::filesystem;
 using Args = std::vector<Value>;
 
-static const int W = 640, H = 480;  // virtual screen
+// A tela do console: 320 x 180 (16:9), fixa. O jogo desenha nesses pixels e o simulador amplia sem
+// suavizar, então o pixel do console é um pixel quadrado na tela do PC.
+static const int W = 320, H = 180;
 
 enum Button { BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_A, BTN_B, BTN_X, BTN_Y, BTN_L, BTN_R, BTN_START, BTN_SELECT, BTN_HOME, NBUTTONS };
 static const char* buttonNames[NBUTTONS] = {"Up", "Down", "Left", "Right", "A", "B", "X", "Y", "L", "R", "Start", "Select", "Home"};
@@ -64,11 +66,22 @@ static std::string crash, pendingLaunch;
 static bool keyDown[256], held[NBUTTONS], was[NBUTTONS];
 static double stickX, stickY, lookX, lookY;  // analógicos, -1..1 (y positivo = para cima/para frente)
 static bool showFps = false, fpsLog = false;  // F3 (ou --fps): contador de quadros
+
+// Orçamento do console: o simulador roda num PC que aguenta muito mais que o alvo da Fase 3, então ele
+// mede o custo de cada quadro e avisa quando o jogo passa do que o hardware de referência entrega.
+struct Orcamento {
+    long long tris = 0, chamadas = 0;
+};
+static Orcamento quadro, pico;
+static double avisou = -9;  // último aviso de estouro, para não repetir todo quadro
+static long long texBytes = 0;                 // memória de textura carregada
+static const long long MAX_TRIS = 30000;       // por quadro (1,8 M/s a 60 fps)
+static const long long MAX_CHAMADAS = 600;     // desenhos por quadro
+static const long long MAX_TEX = 8 << 20;      // 8 MB de textura
+static std::map<GLuint, long long> listaTris;  // triângulos de cada display list
 static double fpsValue = 0, fpsWorst = 0;
 static double dt = 0;         // real seconds since the last frame
 static double timeScale = 1;  // games pause with time.set_scale(0); UI keeps going on time.unscaled_delta
-static GLuint fontBase;
-static GLYPHMETRICSFLOAT glyphs[256];
 
 static bool justPressed(int b) { return held[b] && !was[b]; }
 
@@ -366,7 +379,7 @@ static void buildMeshes() {
     glNewList(meshBase + MESH_SPHERE, GL_COMPILE);  // poles on Y, so textures wrap around the vertical axis
     glPushMatrix();
     glRotated(-90, 1, 0, 0);
-    gluSphere(q, 0.5, 24, 16);
+    gluSphere(q, 0.5, 16, 10);
     glPopMatrix();
     glEndList();
 
@@ -374,12 +387,12 @@ static void buildMeshes() {
     glPushMatrix();
     glRotated(-90, 1, 0, 0);
     glTranslated(0, 0, -1);
-    gluCylinder(q, 0.5, 0.5, 2, 24, 1);
+    gluCylinder(q, 0.5, 0.5, 2, 16, 1);
     gluQuadricOrientation(q, GLU_INSIDE);  // bottom cap faces down
-    gluDisk(q, 0, 0.5, 24, 1);
+    gluDisk(q, 0, 0.5, 16, 1);
     gluQuadricOrientation(q, GLU_OUTSIDE);
     glTranslated(0, 0, 2);
-    gluDisk(q, 0, 0.5, 24, 1);
+    gluDisk(q, 0, 0.5, 16, 1);
     glPopMatrix();
     glEndList();
 
@@ -387,10 +400,10 @@ static void buildMeshes() {
     glPushMatrix();
     glRotated(-90, 1, 0, 0);
     glTranslated(0, 0, -0.5);
-    gluCylinder(q, 0.5, 0.5, 1, 24, 1);
-    gluSphere(q, 0.5, 24, 16);
+    gluCylinder(q, 0.5, 0.5, 1, 16, 1);
+    gluSphere(q, 0.5, 16, 10);
     glTranslated(0, 0, 1);
-    gluSphere(q, 0.5, 24, 16);
+    gluSphere(q, 0.5, 16, 10);
     glPopMatrix();
     glEndList();
 
@@ -405,6 +418,11 @@ static void buildMeshes() {
     glEndList();
 
     gluDeleteQuadric(q);
+    listaTris[meshBase + MESH_CUBE] = 12;
+    listaTris[meshBase + MESH_SPHERE] = 16 * 10 * 2;
+    listaTris[meshBase + MESH_CYLINDER] = 16 * 2 + 16 * 2;
+    listaTris[meshBase + MESH_CAPSULE] = 16 * 2 + 16 * 10 * 4;
+    listaTris[meshBase + MESH_PLANE] = 2;
 }
 
 static Vec3 rgb01(double c) {  // 0xRRGGBB -> components in 0..1
@@ -418,6 +436,8 @@ static void setColor(double c, double alpha = 1) {
 }
 
 static void rect(double x, double y, double w, double h, double c, double alpha = 1) {
+    quadro.chamadas++;
+    quadro.tris += 2;
     mode2D();
     setColor(c, alpha);
     glBegin(GL_QUADS);
@@ -432,15 +452,88 @@ static std::wstring widen(const std::string& s) {
     return w;
 }
 
+// Fonte de pixel: numa tela de 320 x 180, letra vetorial escalada vira borrão. Cada tamanho vira um atlas
+// desenhado pelo GDI **sem suavização**, então o traço cai no pixel inteiro e o texto fica legível.
+struct Font {
+    GLuint tex = 0;
+    int texW = 0, texH = 0;
+    struct Glyph { int x, y, w, h, advance; } g[256] = {};
+};
+static std::map<int, Font> fonts;
+
+static const Font& font(int size) {
+    size = std::clamp(size, 5, 96);
+    if (auto it = fonts.find(size); it != fonts.end()) return it->second;
+    Font f;
+    HDC dc = CreateCompatibleDC(nullptr);
+    HFONT hf = CreateFontW(-size, 0, 0, 0, size <= 12 ? FW_NORMAL : FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET,
+                           OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY, DEFAULT_PITCH, L"Tahoma");
+    SelectObject(dc, hf);
+    TEXTMETRICW tm = {};
+    GetTextMetricsW(dc, &tm);
+    int cell = tm.tmHeight + 1, cols = 16, wide = tm.tmMaxCharWidth + 1;
+    for (f.texW = 1; f.texW < cols * wide; f.texW *= 2) {}
+    for (f.texH = 1; f.texH < ((224 + cols - 1) / cols) * cell; f.texH *= 2) {}
+
+    BITMAPINFO bi = {};
+    bi.bmiHeader = {sizeof bi.bmiHeader, f.texW, -f.texH, 1, 32, BI_RGB};
+    uint32_t* px = nullptr;
+    HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, (void**)&px, nullptr, 0);
+    SelectObject(dc, bmp);
+    RECT all = {0, 0, f.texW, f.texH};
+    FillRect(dc, &all, (HBRUSH)GetStockObject(BLACK_BRUSH));
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, RGB(255, 255, 255));
+    for (int ch = 32; ch < 256; ch++) {
+        wchar_t w = (wchar_t)ch;
+        SIZE sz = {};
+        GetTextExtentPoint32W(dc, &w, 1, &sz);
+        int i = ch - 32, x = (i % cols) * wide, y = (i / cols) * cell;
+        TextOutW(dc, x, y, &w, 1);
+        f.g[ch] = {x, y, std::min<int>(sz.cx, wide), tm.tmHeight, sz.cx};
+    }
+    GdiFlush();
+    std::vector<uint8_t> alpha(size_t(f.texW) * f.texH);
+    for (size_t i = 0; i < alpha.size(); i++) alpha[i] = uint8_t(px[i] & 0xFF);  // branco sobre preto = cobertura
+    DeleteObject(bmp);
+    DeleteObject(hf);
+    DeleteDC(dc);
+
+    glGenTextures(1, &f.tex);
+    glBindTexture(GL_TEXTURE_2D, f.tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, f.texW, f.texH, 0, GL_ALPHA, GL_UNSIGNED_BYTE, alpha.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+    return fonts.emplace(size, f).first->second;
+}
+
 static void textW(double x, double y, const std::wstring& s, double size, double c, double alpha = 1) {
+    quadro.chamadas++;
+    quadro.tris += (long long)s.size() * 2;
     mode2D();
     setColor(c, alpha);
-    glPushMatrix();
-    glTranslated(x, y + size * 0.8, 0);  // y = top of the text; glyph outlines sit on the baseline
-    glScaled(size, -size, 1);            // glyphs are y-up, the screen is y-down
-    glListBase(fontBase);
-    glCallLists((GLsizei)s.size(), GL_UNSIGNED_SHORT, s.data());
-    glPopMatrix();
+    const Font& f = font((int)std::lround(size));
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, f.tex);
+    double cx = std::floor(x), cy = std::floor(y);  // texto sempre em pixel inteiro
+    glBegin(GL_QUADS);
+    for (wchar_t ch : s) {
+        const Font::Glyph& g = f.g[ch & 0xFF];
+        if (g.w > 0) {
+            double u0 = double(g.x) / f.texW, v0 = double(g.y) / f.texH;
+            double u1 = double(g.x + g.w) / f.texW, v1 = double(g.y + g.h) / f.texH;
+            glTexCoord2d(u0, v0); glVertex2d(cx, cy);
+            glTexCoord2d(u1, v0); glVertex2d(cx + g.w, cy);
+            glTexCoord2d(u1, v1); glVertex2d(cx + g.w, cy + g.h);
+            glTexCoord2d(u0, v1); glVertex2d(cx, cy + g.h);
+        }
+        cx += g.advance;
+    }
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
 }
 
 static void text(double x, double y, const std::string& s, double size, double c, double alpha = 1) {
@@ -448,9 +541,10 @@ static void text(double x, double y, const std::string& s, double size, double c
 }
 
 static double textWidth(const std::string& s, double size) {
+    const Font& f = font((int)std::lround(size));
     double w = 0;
-    for (wchar_t ch : widen(s)) w += glyphs[ch].gmfCellIncX;
-    return w * size;
+    for (wchar_t ch : widen(s)) w += f.g[ch & 0xFF].advance;
+    return w;
 }
 
 struct Image { GLuint tex = 0; int w = 0, h = 0; };
@@ -496,6 +590,7 @@ static const Image& image(const fs::path& p) {
     glBindTexture(GL_TEXTURE_2D, img.tex);
     const GLenum GL_GENERATE_MIPMAP = 0x8191;  // GL 1.4: the driver builds the mip levels (no shimmer far away)
     glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
+    texBytes += (long long)img.w * img.h * 4;
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.w, img.h, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, px.data());
     return img;
 }
@@ -904,6 +999,7 @@ static const Model& model(const fs::path& p) {
         }
         glEnd();
         glEndList();
+        listaTris[list] = (long long)part.tris.size() / 3;
         m.parts.push_back({list, part.texture.empty() ? 0 : texture(dir / fs::u8path(part.texture)), part.color});
     }
     return models[p] = std::move(m);
@@ -956,11 +1052,14 @@ static GLuint terrainMesh(const std::shared_ptr<Array>& rows, Vec3 size, double 
     }
     glEnd();
     glEndList();
+    listaTris[list] = (long long)(H - 1) * (W - 1) * 2;
     terrainMeshes[key] = {rows, list};
     return list;
 }
 
 static void drawPart(GLuint list, GLuint tex, Vec3 rgb) {  // lit color x texture (GL_MODULATE / the shader)
+    quadro.chamadas++;
+    quadro.tris += listaTris[list];
     glColor3d(rgb.x, rgb.y, rgb.z);
     if (shader) glUniform1i(shader->useTexture, tex ? 1 : 0);
     if (tex) {
@@ -1108,12 +1207,12 @@ static void registerSdk() {
         glPopMatrix();
         return Value();
     });
-    vm.addNative("heightmap_read", [](Instance&, Args& a) {  // ("relevo.png") -> rows of 0..1 (brightness), max 129 x 129
+    vm.addNative("heightmap_read", [](Instance&, Args& a) {  // ("relevo.png") -> linhas de 0..1 (brilho), no máximo 65 x 65
         int w = 0, h = 0;
         std::vector<uint32_t> px;
         if (!decodeImage(active->base / fs::u8path(str(a, 0)), w, h, px) || w < 2 || h < 2)
             throw std::runtime_error("heightmap não encontrado ou inválido: " + str(a, 0));
-        int step = std::max(1, (std::max(w, h) - 1 + 127) / 128);  // keeps the grid (and the mesh) small
+        int step = std::max(1, (std::max(w, h) - 1 + 63) / 64);  // grade de no máximo 65 x 65: 8 mil triângulos
         auto rows = std::make_shared<Array>();
         for (int y = 0; y < h; y += step) {
             auto row = std::make_shared<Array>();
@@ -1328,6 +1427,55 @@ static void registerSdk() {
     });
 }
 
+// ---------- apresentação: o quadro do console vai para a tela do PC ----------
+
+// Copia os W x H pixels desenhados e desenha ampliado, em número inteiro de vezes (2x, 3x...) e sem
+// suavizar: é o que faz a limitação de resolução aparecer em vez de virar só um sistema de coordenadas.
+static void present(const RECT& rc) {
+    static GLuint tela = 0;
+    if (!tela) {
+        glGenTextures(1, &tela);
+        glBindTexture(GL_TEXTURE_2D, tela);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, W, H, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);  // GL 1.1: sem repetir na borda
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+    }
+    glBindTexture(GL_TEXTURE_2D, tela);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, W, H);
+
+    int escala = std::min(rc.right / W, rc.bottom / H);
+    int vw = escala > 0 ? W * escala : std::min<int>(rc.right, rc.bottom * W / H);
+    int vh = escala > 0 ? H * escala : std::max(1, vw * H / W);
+    int vx = (rc.right - vw) / 2, vy = (rc.bottom - vh) / 2;
+
+    if (shadersOk) glUseProgram(0);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);
+    glViewport(0, 0, rc.right, rc.bottom);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);  // tarjas pretas em volta
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, rc.right, 0, rc.bottom, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glColor4d(1, 1, 1, 1);
+    glBegin(GL_QUADS);
+    glTexCoord2d(0, 0); glVertex2i(vx, vy);
+    glTexCoord2d(1, 0); glVertex2i(vx + vw, vy);
+    glTexCoord2d(1, 1); glVertex2i(vx + vw, vy + vh);
+    glTexCoord2d(0, 1); glVertex2i(vx, vy + vh);
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    mode = -1;  // o próximo quadro refaz projeção e estado do zero
+}
+
 // ---------- main loop ----------
 
 static void frame() {
@@ -1431,6 +1579,12 @@ static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         return 0;
     case WM_KEYUP: keyDown[w & 0xFF] = false; return 0;
     case WM_KILLFOCUS: memset(keyDown, 0, sizeof keyDown); return 0;
+    case WM_GETMINMAXINFO: {  // a janela nunca fica menor que a tela do console
+        RECT r = {0, 0, W, H};
+        AdjustWindowRect(&r, (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE), FALSE);
+        ((MINMAXINFO*)l)->ptMinTrackSize = {r.right - r.left, r.bottom - r.top};
+        return 0;
+    }
     case WM_CLOSE: PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(hwnd, msg, w, l);
@@ -1457,7 +1611,7 @@ int main(int argc, char** argv) {
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.lpszClassName = L"Doodle";
     RegisterClassW(&wc);
-    RECT r = {0, 0, W * 3 / 2, H * 3 / 2};
+    RECT r = {0, 0, W * 3, H * 3};
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
     HWND hwnd = CreateWindowW(L"Doodle", L"Doodle Simulator", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
                               r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
@@ -1487,12 +1641,6 @@ int main(int argc, char** argv) {
     if (!shadersOk) fprintf(stderr, "aviso: sem shaders no driver; iluminação por vértice e render.set_shader desligado\n");
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    SelectObject(dc, CreateFontW(-64, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                 ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI"));
-    fontBase = glGenLists(256);
-    if (!wglUseFontOutlinesW(dc, 32, 224, fontBase + 32, 0, 0, WGL_FONT_POLYGONS, glyphs + 32))
-        fprintf(stderr, "aviso: fonte não carregou, textos não vão aparecer\n");
-
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);  // WIC (images) is COM
     initAudio();
     guarded(bootFirmware);
@@ -1527,25 +1675,35 @@ int main(int argc, char** argv) {
 
         RECT rc;
         GetClientRect(hwnd, &rc);
-        int vw = std::min<int>(rc.right, rc.bottom * W / H), vh = vw * H / W;  // 4:3 letterbox
-        int vx = (rc.right - vw) / 2, vy = (rc.bottom - vh) / 2;
-        glViewport(vx, vy, vw, vh);
-        glDisable(GL_SCISSOR_TEST);  // black bars, then keep render.clear inside the virtual screen
+        glViewport(0, 0, W, H);  // o console desenha sempre no canto, em 320 x 180
+        glDisable(GL_SCISSOR_TEST);
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glScissor(vx, vy, vw, vh);
+        glScissor(0, 0, W, H);
         glEnable(GL_SCISSOR_TEST);
         pollInput();
         elapsed += dt;
+        quadro = {};  // o orçamento conta um quadro por vez
         beginFrameLighting();
         frame();
+        bool estourou = quadro.tris > MAX_TRIS || quadro.chamadas > MAX_CHAMADAS || texBytes > MAX_TEX;
+        pico.tris = std::max(pico.tris, quadro.tris);
+        pico.chamadas = std::max(pico.chamadas, quadro.chamadas);
+        if (estourou && elapsed - avisou > 3) {  // avisa, não bloqueia: no PC dá, no alvo da Fase 3 pode não dar
+            avisou = elapsed;
+            fprintf(stderr, "orçamento do console estourado: %lld triângulos (máx %lld), %lld desenhos (máx %lld), %.1f MB de textura (máx %lld MB)\n",
+                    quadro.tris, MAX_TRIS, quadro.chamadas, MAX_CHAMADAS, texBytes / 1048576.0, MAX_TEX >> 20);
+        }
         if (showFps) {
-            char buf[64];
+            char buf[80];
             snprintf(buf, sizeof buf, "%.0f fps  %.1f ms  pior %.1f", fpsValue, fpsValue > 0 ? 1000 / fpsValue : 0.0,
                      fpsWorst * 1000);
-            rect(W - 232, 6, 226, 26, 0x000000, 0.45);
-            text(W - 226, 9, buf, 17, 0x9BE86B);
+            rect(W - 116, 3, 113, 23, 0x000000, 0.45);
+            text(W - 113, 4, buf, 9, 0x9BE86B);
+            snprintf(buf, sizeof buf, "%lld tri  %lld des  %.1f MB", quadro.tris, quadro.chamadas, texBytes / 1048576.0);
+            text(W - 113, 14, buf, 9, estourou ? 0xFF6B6B : 0x9BE86B);
         }
+        present(rc);
         updateAudio();
         SwapBuffers(dc);
     }

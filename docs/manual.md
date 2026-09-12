@@ -36,8 +36,9 @@ O Doodle é um console com linguagem própria, a **Doo**. As peças:
 | Firmware | `firmware/` | O sistema do console (boot e menu estilo XMB), escrito em Doo |
 | Jogos | `games/` | Uma pasta por jogo |
 
-A tela virtual tem **640 × 480** pixels e roda a **60 quadros por segundo**. A janela pode ser redimensionada;
-a imagem mantém a proporção 4:3.
+A tela do console tem **320 × 180** pixels (16:9) e roda a **60 quadros por segundo**. O jogo desenha nesses
+pixels e o simulador amplia por um número inteiro de vezes, sem suavizar: o pixel do console aparece como
+pixel. Esses limites são escolha de projeto, não acidente — a seção 15 lista todos.
 
 ## 2. Compilar e rodar
 
@@ -79,7 +80,7 @@ HOME é sempre do sistema: sai do jogo e volta ao menu.
 | Tecla | Para quê |
 |---|---|
 | F11 ou Alt+Enter | Alterna tela cheia (modo console) |
-| F3 | Mostra/esconde o contador de quadros (fps, tempo do quadro e o pior quadro do último segundo) |
+| F3 | Mostra/esconde os contadores: fps, tempo do quadro, pior quadro, e o orçamento (triângulos, desenhos, textura) |
 
 A tela do console é sempre 640×480 em 4:3: em tela cheia a imagem é esticada até caber e o resto vira
 tarja preta, então o jogo não precisa saber o tamanho do monitor.
@@ -710,15 +711,38 @@ tem essa marca pode ser desinstalado — um jogo escrito à mão nunca é apagad
 | `... em um objeto que já foi destruído` | Referência a um objeto que não existe mais: teste `if (ref)` antes |
 | `recursão profunda demais (stack overflow)` | Mais de 200 chamadas aninhadas |
 
-## 15. Limites conhecidos
+## 15. Os limites do console
+
+### 15.1 De propósito
+
+O Doodle é um console pequeno por decisão de projeto: a graça é fazer jogo com a régua da época. Estes
+números são fixos, e o simulador mede o que o jogo gasta para você saber onde está antes de rodar no
+hardware da Fase 3 (aperte **F3** para ver, ou rode com `--fps`).
+
+| Limite | Valor | O que acontece ao passar |
+|---|---|---|
+| Tela | 320 × 180, 16:9 | Fixo: não há como pedir outra resolução |
+| Quadros | 60 por segundo | O console espera o vsync |
+| Triângulos | 30 000 por quadro | Aviso no terminal e o contador fica vermelho |
+| Desenhos | 600 por quadro | Idem |
+| Textura | 8 MB carregados | Idem |
+| Luzes | 8 por quadro | A nona é recusada (`light_point` devolve `false`) |
+| Recursão | 200 chamadas | Erro de execução |
+
+O terreno vira uma grade de no máximo 65 × 65 (8 mil triângulos) e as malhas prontas são de baixa
+contagem, de propósito: esfera com 320 triângulos, cápsula com 672.
+
+### 15.2 O que ainda falta
+
+Isto não é escolha, é trabalho a fazer:
 
 | Área | Limite atual |
 |---|---|
 | Linguagem | Sem `break`/`continue`, `self`, `++`, operador ternário, dicionários, `with` |
 | Números | Um tipo só, ponto flutuante, como o `real` da GML (sem inteiro separado) |
 | Física | Colisores sem rotação; dois `Rigidbody` só avisam o contato (não se empurram); qualquer rampa de terreno é caminhável |
-| Render | Até 8 luzes por quadro; sem sombras; câmera só em perspectiva; modelos sem animação; terreno com uma textura só |
-| Áudio | Só WAV PCM; som posicional só no volume (sem esquerda/direita) |
+| Render | Sem sombras; câmera só em perspectiva; modelos sem animação; terreno com uma textura só |
+| Áudio | Só WAV PCM; som posicional só no volume (sem esquerda/direita); sem limite de vozes |
 | UI | Só controle (sem mouse/toque); sem campo de texto nem listas com rolagem |
 | Controle | Só o controle 1 (sem 2 jogadores); sem vibração e sem gatilhos analógicos |
 | Loja | Servidor de arquivos estáticos, sem conta nem pagamento |

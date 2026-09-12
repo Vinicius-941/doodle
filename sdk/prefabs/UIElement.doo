@@ -1,12 +1,12 @@
 object UIElement
 
-// Base dos elementos de UI do SDK (Text, Image, Button, Slider). Posição e tamanho em pixels da tela (640 x 480).
+// Base dos elementos de UI do SDK (Text, Image, Button, Slider). Posição e tamanho em pixels da tela (320 x 180).
 // Quem desenha e cuida do foco é o Canvas: o elemento só sabe se pintar e reagir ao controle.
 
 var x = 0
 var y = 0
-var w = 100
-var h = 40
+var w = 60
+var h = 18
 var visible = true
 var alpha = 1
 var color = 0xFFFFFF

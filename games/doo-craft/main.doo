@@ -38,15 +38,15 @@ function create() {
     edits = save_get("edits", 0)
     save_set("seed", seed)
     menu = instance_create(Canvas)
-    var panel = menu.image("", 110, 75, 420, 330)
+    var panel = menu.image("", 55, 26, 210, 128)
     panel.color = 0x101D25
     panel.alpha = 0.96
-    menu.text("DOOCRAFT", 195, 95, 38)
-    menu.text("Um mundo para construir", 192, 142, 19)
-    resumeButton = menu.button("Continuar", 175, 185, 290, 44)
-    helpButton = menu.button("Mostrar / ocultar controles", 175, 240, 290, 44)
-    homeButton = menu.button("Salvar e voltar ao console", 175, 295, 290, 44)
-    menu.text("Z confirma  /  Setas navegam", 192, 360, 17)
+    menu.text("DOOCRAFT", 108, 34, 20)
+    menu.text("Um mundo para construir", 101, 56, 10)
+    resumeButton = menu.button("Continuar", 85, 72, 150, 19)
+    helpButton = menu.button("Mostrar / ocultar controles", 85, 94, 150, 19)
+    homeButton = menu.button("Salvar e voltar ao console", 85, 116, 150, 19)
+    menu.text("Z confirma  /  Setas navegam", 96, 140, 9)
     menu.visible = false
     menu.active = false
 }
@@ -343,12 +343,12 @@ function draw() {
     draw_clear(0x91BCE0)
     if (stage < 4) {
         draw_clear(0x142730)
-        draw_text(194, 158, "DOOCRAFT", 42, 0xF1E9D2)
+        draw_text(97, 58, "DOOCRAFT", 22, 0xF1E9D2)
         var labels = ["Criando montanhas e camadas...", "Plantando arvores...", "Restaurando suas construcoes...", "Preparando o mundo..."]
-        draw_text(152, 230, labels[stage], 20, 0xA6C5BC)
-        draw_rectangle(150, 277, 340, 8, 0x324A50)
-        draw_rectangle(150, 277, 340 * (stage + cursor / (width * width)) / 4, 8, 0x89BB63)
-        draw_text(246, 315, "Semente " + seed, 16, 0x9CAFAD)
+        draw_text(76, 88, labels[stage], 10, 0xA6C5BC)
+        draw_rectangle(75, 106, 170, 4, 0x324A50)
+        draw_rectangle(75, 106, 170 * (stage + cursor / (width * width)) / 4, 4, 0x89BB63)
+        draw_text(123, 122, "Semente " + seed, 10, 0x9CAFAD)
         return
     }
     var facing = direction()
@@ -379,28 +379,28 @@ function draw() {
         }
     }
     if (target.x >= 0) { outline(target) }
-    draw_rectangle(310, 239, 21, 3, 0x17232A)
-    draw_rectangle(319, 230, 3, 21, 0x17232A)
-    draw_rectangle(311, 240, 19, 1, 0xFFFFFF)
-    draw_rectangle(320, 231, 1, 19, 0xFFFFFF)
-    draw_rectangle(12, 12, 206, 48, 0x142730, 0.8)
-    draw_text(23, 17, "DOOCRAFT / CRIATIVO", 17, 0xF2EBD9)
-    draw_text(23, 39, floor(position.x) + " / " + floor(position.y) + " / " + floor(position.z) + "   Seed " + seed, 12, 0xB7D3CA)
+    draw_rectangle(155, 89, 11, 3, 0x17232A)
+    draw_rectangle(159, 85, 3, 11, 0x17232A)
+    draw_rectangle(156, 90, 9, 1, 0xFFFFFF)
+    draw_rectangle(160, 86, 1, 9, 0xFFFFFF)
+    draw_rectangle(6, 6, 118, 26, 0x142730, 0.8)
+    draw_text(11, 8, "DOOCRAFT / CRIATIVO", 10, 0xF2EBD9)
+    draw_text(11, 20, floor(x) + " / " + floor(y) + " / " + floor(z) + "  Seed " + seed, 9, 0xB7D3CA)
     if (help && !paused) {
-        draw_rectangle(12, 72, 296, 84, 0x142730, 0.75)
-        draw_text(22, 79, "Setas: andar / girar   Z: pular", 15, 0xFFFFFF)
-        draw_text(22, 98, "Analógico direito ou IJKL: olhar", 14, 0xFFFFFF)
-        draw_text(22, 117, "A: quebrar   X: colocar   S: copiar bloco", 14, 0xFFFFFF)
-        draw_text(22, 136, "Q / W: bloco   Enter: menu   Esc: HOME", 14, 0xFFFFFF)
+        draw_rectangle(6, 36, 150, 50, 0x142730, 0.75)
+        draw_text(11, 39, "Setas: andar   Z: pular", 10, 0xFFFFFF)
+        draw_text(11, 51, "Analógico direito ou IJKL: olhar", 9, 0xFFFFFF)
+        draw_text(11, 63, "A: quebrar   X: colocar   S: copiar", 9, 0xFFFFFF)
+        draw_text(11, 75, "Q / W: bloco   Enter: menu", 9, 0xFFFFFF)
     }
-    draw_rectangle(148, 415, 344, 54, 0x142730, 0.9)
+    draw_rectangle(74, 156, 172, 22, 0x142730, 0.9)
     for (var i = 1; i <= 7; i += 1) {
-        var x = 154 + (i - 1) * 48
-        if (i == selected) { draw_rectangle(x - 2, 419, 46, 46, 0xE8D6A3) }
-        draw_rectangle(x, 421, 42, 42, 0x33474B)
-        draw_sprite(textures[i], x + 5, 426, 32, 32)
+        var bx = 77 + (i - 1) * 24
+        if (i == selected) { draw_rectangle(bx - 1, 158, 22, 18, 0xE8D6A3) }
+        draw_rectangle(bx, 159, 20, 16, 0x33474B)
+        draw_sprite(textures[i], bx + 3, 160, 14, 14)
     }
     var label = names[selected] + "  /  ilimitado"
-    draw_rectangle(218, 385, 204, 25, 0x142730, 0.8)
-    draw_text(320 - string_width(label, 16) / 2, 389, label, 16, 0xFFFFFF)
+    draw_rectangle(109, 142, 102, 12, 0x142730, 0.8)
+    draw_text(160 - string_width(label, 9) / 2, 144, label, 9, 0xFFFFFF)
 }

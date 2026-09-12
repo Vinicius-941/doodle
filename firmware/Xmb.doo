@@ -9,8 +9,8 @@ var cat = 1          // categoria atual (começa em Jogos)
 var sel = [0, 0, 0]  // item escolhido em cada categoria
 var cx = 1           // posições animadas, que correm atrás de cat e de sel[cat]
 var sy = 0
-var col = 150        // coluna das categorias e dos itens
-var row = 112        // linha dos ícones das categorias
+var col = 74         // coluna das categorias e dos itens
+var row = 44         // linha dos ícones das categorias
 var t = 0
 var fade = 0         // entrada suave depois do boot
 
@@ -137,7 +137,7 @@ function abrir(c, i) {
         modo = "editar"
         audio_play_tone(880, 50)
     } else if (c == 0) {
-        mostrar(["Doodle", "Firmware 0.1 - linguagem Doo", "Tela 640 x 480 a 60 quadros por segundo", "Simulador para Windows"])
+        mostrar(["Doodle", "Firmware 0.1 - linguagem Doo", "Tela 320 x 180 (16:9) a 60 quadros", "Simulador para Windows"])
     } else if (c == 1) {
         if (array_length(jogos) > 0) {
             iniciar(jogos[i])
@@ -235,6 +235,14 @@ function mostrar(linhas) {
     audio_play_tone(880, 50)
 }
 
+function cortar(s, largura, tam) {   // encurta até caber, com reticências
+    if (string_width(s, tam) <= largura) { return s }
+    while (string_length(s) > 4 && string_width(s + "...", tam) > largura) {
+        s = string_copy(s, 1, string_length(s) - 1)
+    }
+    return s + "..."
+}
+
 function tamanho(id) {
     var b = store_size(id)
     if (b >= 1048576) { return floor(b / 104857.6) / 10 + " MB" }
@@ -268,7 +276,7 @@ function valor(c, i) {
 function dica(c, i) {
     if (c == 0 && i < 2) { return "A: ajustar" }
     if (c == 0) { return "Versão do sistema" }
-    if (c == 1) { return "Coloque jogos na pasta games/" }
+    if (c == 1) { return "Ponha jogos em games/" }
     return estadoLoja()
 }
 
@@ -277,65 +285,65 @@ function dica(c, i) {
 function draw() {
     fundo()
 
-    var hora = clock_date() + "   " + clock_time()
-    draw_text(610 - string_width(hora, 18), 20, hora, 18, 0xFFFFFF)
+    var hora = clock_date() + "  " + clock_time()
+    draw_text(312 - string_width(hora, 10), 6, hora, 10, 0xFFFFFF)
 
     for (var c = 0; c < 3; c += 1) {
-        var x = col + (c - cx) * 130
-        var s = 44
+        var x = col + (c - cx) * 66
+        var s = 22
         var a = 0.5
         if (c == cat) {
-            s = 60
+            s = 30
             a = 1
         }
         draw_sprite(icones[c], x - s / 2, row - s / 2, s, s, a)
     }
-    centrado(col, row + 36, cats[cat], 16, 1)
+    centrado(col, row + 16, cats[cat], 10, 1)
 
     var n = contar(cat)
     for (var i = 0; i < n; i += 1) {   // o item escolhido fica logo abaixo das categorias; os anteriores, acima
         var d = i - sy
-        var y = 210 + d * 64
-        if (d < 0) { y = 210 + d * 164 }
-        if (d < -1) { y = 46 + (d + 1) * 64 }
-        if (y > -50 && y < 470) {
+        var y = 95 + d * 30
+        if (d < 0) { y = 95 + d * 64 }
+        if (d < -1) { y = 22 + (d + 1) * 30 }
+        if (y > -20 && y < 178) {
             item(cat, i, y, i == sel[cat])
         }
     }
 
     if (modo == "painel") {
-        draw_rectangle(0, 0, 640, 480, 0x000000, 0.88)
+        draw_rectangle(0, 0, 320, 180, 0x000000, 0.88)
         for (var i = 0; i < array_length(painel); i += 1) {
-            var tam = 18
-            if (i == 0) { tam = 30 }
-            centrado(320, 140 + i * 42, painel[i], tam, 1)
+            var tam = 10
+            if (i == 0) { tam = 16 }
+            centrado(160, 42 + i * 20, painel[i], tam, 1)
         }
-        centrado(320, 400, "A ou B: voltar", 15, 0.8)
+        centrado(160, 158, "A ou B: voltar", 10, 0.8)
     }
     if (modo == "opcoes") {   // menu lateral, como o do triângulo no PS3
-        draw_rectangle(0, 0, 640, 480, 0x000000, 0.4)
-        draw_rectangle(380, 0, 260, 480, 0x0A1020, 0.9)
-        draw_text(396, 150, titulos[sel[1]], 20, 0xFFFFFF)
+        draw_rectangle(0, 0, 320, 180, 0x000000, 0.4)
+        draw_rectangle(188, 0, 132, 180, 0x0A1020, 0.9)
+        draw_text(196, 50, cortar(titulos[sel[1]], 118, 10), 10, 0xFFFFFF)
         for (var i = 0; i < array_length(opcoesNomes); i += 1) {
-            var oy = 196 + i * 38
-            if (i == opcao) { draw_rectangle(384, oy - 6, 252, 34, 0xFFFFFF, 0.15) }
-            draw_text(400, oy, opcoesNomes[i], 18, 0xFFFFFF)
+            var oy = 76 + i * 18
+            if (i == opcao) { draw_rectangle(190, oy - 3, 128, 16, 0xFFFFFF, 0.15) }
+            draw_text(198, oy, opcoesNomes[i], 10, 0xFFFFFF)
         }
     }
 
-    var dicas = "A: abrir      Esquerda/Direita: categorias"
-    if (cat == 1) { dicas = "A: jogar      Y: opções      Esquerda/Direita: categorias" }
+    var dicas = "A: abrir    Esq/Dir: muda"
+    if (cat == 1) { dicas = "A: jogar    Y: opções" }
     if (cat == 2) {
-        dicas = "A: instalar ou jogar      X: atualizar a lista"
+        dicas = "A: instalar    X: atualizar"
         if (store_busy()) { dicas = "Loja: falando com o servidor..." }
         if (store_error() != "") { dicas = "Loja: " + store_error() }
     }
-    if (modo == "editar") { dicas = "Esquerda/Direita: ajustar      A: confirmar" }
-    if (modo == "opcoes") { dicas = "A: confirmar      B: voltar" }
-    if (modo != "painel") { draw_text(30, 450, dicas, 14, 0xFFFFFF, 0.75) }
+    if (modo == "editar") { dicas = "Esq/Dir: ajusta    A: ok" }
+    if (modo == "opcoes") { dicas = "A: confirmar    B: voltar" }
+    if (modo != "painel") { draw_text(12, 166, dicas, 10, 0xFFFFFF, 0.75) }
 
     if (fade < 1) {   // sai do preto do boot
-        draw_rectangle(0, 0, 640, 480, 0x000000, 1 - fade)
+        draw_rectangle(0, 0, 320, 180, 0x000000, 1 - fade)
     }
 }
 
@@ -343,63 +351,63 @@ function item(c, i, y, on) {
     var a = 0.6
     if (on) {
         a = 1
-        draw_rectangle(col - 50, y - 38, 520, 76, 0xFFFFFF, 0.07 + 0.04 * sin(t * 3))   // brilho pulsando
+        draw_rectangle(col - 24, y - 17, 262, 34, 0xFFFFFF, 0.07 + 0.04 * sin(t * 3))   // brilho pulsando
     }
     if (c == 1 && array_length(jogos) > 0) {
-        var w = 96
-        var h = 53
+        var w = 44
+        var h = 25
         if (on) {
-            w = 128
-            h = 70
+            w = 58
+            h = 33
         }
-        if (!draw_sprite("games/" + jogos[i] + "/icon.png", col - 40, y - h / 2, w, h, a)) {
-            draw_rectangle(col - 40, y - h / 2, w, h, 0x607090, a)
+        if (!draw_sprite("games/" + jogos[i] + "/icon.png", col - 20, y - h / 2, w, h, a)) {
+            draw_rectangle(col - 20, y - h / 2, w, h, 0x607090, a)
         }
-        draw_text(col + 100, y - 16, titulos[i], 24, 0xFFFFFF, a)
+        draw_text(col + 46, y - 9, titulos[i], 11, 0xFFFFFF, a)
         if (on) {
             var info = "Sem dados salvos"
             if (game_save_data(jogos[i]) != "") { info = "Dados salvos" }
-            draw_text(col + 100, y + 14, info, 14, 0xE0E8FF, 0.85)
+            draw_text(col + 46, y + 4, info, 9, 0xE0E8FF, 0.85)
         }
         return
     }
     if (c == 2 && array_length(loja) > 0) {
         var id = loja[i]
-        draw_sprite(icones[2], col - 16, y - 16, 32, 32, a)
-        draw_text(col + 30, y - 14, lojaTitulos[i], 22, 0xFFFFFF, a)
+        draw_sprite(icones[2], col - 8, y - 8, 16, 16, a)
+        draw_text(col + 16, y - 9, lojaTitulos[i], 11, 0xFFFFFF, a)
         var estado = tamanho(id)
         if (game_installed(id)) { estado = "Instalado" }
         if (baixando == id) { estado = floor(store_progress() * 100) + "%" }
-        draw_text(600 - string_width(estado, 18), y - 12, estado, 18, 0xFFFFFF, a)
+        draw_text(302 - string_width(estado, 9), y - 7, estado, 9, 0xFFFFFF, a)
         if (baixando == id) {
-            draw_rectangle(col + 30, y + 18, 400, 6, 0x000000, 0.4 * a)
-            draw_rectangle(col + 30, y + 18, 400 * store_progress(), 6, 0x7BD36B, a)
+            draw_rectangle(col + 16, y + 6, 190, 3, 0x000000, 0.4 * a)
+            draw_rectangle(col + 16, y + 6, 190 * store_progress(), 3, 0x7BD36B, a)
         } else if (on) {
-            draw_text(col + 30, y + 14, store_info(id), 14, 0xE0E8FF, 0.85)
+            draw_text(col + 16, y + 3, store_info(id), 9, 0xE0E8FF, 0.85)
         }
         return
     }
-    draw_sprite(icones[c], col - 16, y - 16, 32, 32, a)
-    draw_text(col + 30, y - 14, rotulo(c, i), 22, 0xFFFFFF, a)
+    draw_sprite(icones[c], col - 8, y - 8, 16, 16, a)
+    draw_text(col + 16, y - 9, rotulo(c, i), 11, 0xFFFFFF, a)
     var v = valor(c, i)
     if (v != "" && y > row) {   // itens acima das categorias mostram só o nome
-        if (on && modo == "editar") { v = "<   " + v + "   >" }
-        draw_text(600 - string_width(v, 20), y - 12, v, 20, 0xFFFFFF, a)
+        if (on && modo == "editar") { v = "<  " + v + "  >" }
+        draw_text(302 - string_width(v, 10), y - 8, v, 10, 0xFFFFFF, a)
     }
     if (on) {
-        draw_text(col + 30, y + 14, dica(c, i), 14, 0xE0E8FF, 0.85)
+        draw_text(col + 16, y + 3, dica(c, i), 9, 0xE0E8FF, 0.85)
     }
 }
 
 function fundo() {   // gradiente na cor do tema + onda de luz ondulando, como no PS3
     var c = temaCores[tema]
-    draw_gradient(0, 0, 640, 480, escuro(c, 0.2), c)
+    draw_gradient(0, 0, 320, 180, escuro(c, 0.2), c)
     for (var camada = 0; camada < 2; camada += 1) {
         var v = 0.35 + camada * 0.25
-        for (var x = 0; x < 640; x += 4) {
-            var y = 330 + sin(x * 0.009 + t * v + camada * 2.1) * (34 + camada * 14) + sin(x * 0.023 - t * 0.7) * 8
-            draw_gradient(x, y - 26, 4, 26, 0xFFFFFF, 0xFFFFFF, 0, 0.12)
-            draw_gradient(x, y, 4, 26, 0xFFFFFF, 0xFFFFFF, 0.12, 0)
+        for (var x = 0; x < 320; x += 2) {
+            var y = 124 + sin(x * 0.018 + t * v + camada * 2.1) * (13 + camada * 5) + sin(x * 0.046 - t * 0.7) * 3
+            draw_gradient(x, y - 10, 2, 10, 0xFFFFFF, 0xFFFFFF, 0, 0.12)
+            draw_gradient(x, y, 2, 10, 0xFFFFFF, 0xFFFFFF, 0.12, 0)
         }
     }
 }

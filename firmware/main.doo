@@ -1,7 +1,7 @@
 object Firmware
 
 // Firmware do Doodle: tela de boot e, depois, o menu do sistema (Xmb.doo).
-// É um "jogo especial" com privilégios de sistema (system.*).
+// É um "jogo especial" com privilégios de sistema (system_*).
 
 var t = 0
 var chimed = false
@@ -28,10 +28,10 @@ function draw() {
         audio_play_tone(784, 250)
         chimed = true
     }
-    centered(170, "DOODLE", 80, make_color_rgb(255 * k, 255 * k, 255 * k))
-    centered(280, "entertainment system", 18, make_color_rgb(120 * k, 140 * k, 200 * k))
+    centered(60, "DOODLE", 34, make_color_rgb(255 * k, 255 * k, 255 * k))
+    centered(104, "entertainment system", 9, make_color_rgb(120 * k, 140 * k, 200 * k))
 }
 
 function centered(y, s, size, color) {
-    draw_text((640 - string_width(s, size)) / 2, y, s, size, color)
+    draw_text((320 - string_width(s, size)) / 2, y, s, size, color)
 }
