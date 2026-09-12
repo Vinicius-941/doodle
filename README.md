@@ -21,6 +21,10 @@ cmake --build build --config Release
 .\build\Release\doodle.exe
 ```
 
+Use `--console` para abrir direto em tela cheia (F11 ou Alt+Enter alterna a
+qualquer momento) e `--fps` para ligar o contador de quadros, que F3 também
+mostra e esconde.
+
 O simulador abre o firmware, que permite selecionar os jogos disponíveis.
 Os arquivos `.doo` são compilados ao carregar o programa; editar um jogo não
 exige recompilar o simulador. Mantenha as pastas de código e recursos no local

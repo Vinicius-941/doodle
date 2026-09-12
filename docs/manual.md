@@ -52,6 +52,8 @@ build\Release\doodle.exe
 | Comando | Para quê |
 |---|---|
 | `build\Release\doodle.exe` | Liga o console (firmware → menu → jogos) |
+| `build\Release\doodle.exe --console` | Liga direto em tela cheia (modo console) |
+| `build\Release\doodle.exe --fps` | Liga com o contador de quadros e escreve uma linha por segundo no terminal |
 | `build\Release\doodle.exe --check` | Só compila o firmware e todos os jogos e mostra os erros |
 | `ctest --test-dir build -C Release` | Testes do compilador, da VM, da física e dos prefabs |
 
@@ -69,6 +71,16 @@ pelo menu, sem recompilar o simulador.
 | HOME | Esc | Back |
 
 HOME é sempre do sistema: sai do jogo e volta ao menu.
+
+**Teclas do simulador** (não chegam ao jogo):
+
+| Tecla | Para quê |
+|---|---|
+| F11 ou Alt+Enter | Alterna tela cheia (modo console) |
+| F3 | Mostra/esconde o contador de quadros (fps, tempo do quadro e o pior quadro do último segundo) |
+
+A tela do console é sempre 640×480 em 4:3: em tela cheia a imagem é esticada até caber e o resto vira
+tarja preta, então o jogo não precisa saber o tamanho do monitor.
 
 ## 3. Estrutura de um jogo
 

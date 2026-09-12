@@ -57,6 +57,8 @@ static Program firmware, game;
 static Program* active = &firmware;
 static std::string crash, pendingLaunch;
 static bool keyDown[256], held[NBUTTONS], was[NBUTTONS];
+static bool showFps = false, fpsLog = false;  // F3 (ou --fps): contador de quadros
+static double fpsValue = 0, fpsWorst = 0;
 static double dt = 0;         // real seconds since the last frame
 static double timeScale = 1;  // games pause with time.set_scale(0); UI keeps going on time.unscaled_delta
 static GLuint fontBase;
@@ -1189,9 +1191,44 @@ static int checkAll() {
     return ok ? 0 : 1;
 }
 
+// ---------- modo console: tela cheia sem borda ----------
+
+static bool fullscreen = false;
+
+// ponytail: tela cheia sem borda (nao troca a resolucao do monitor); o letterbox 4:3 do loop cuida do resto
+static void setFullscreen(HWND hwnd, bool on) {
+    static RECT saved = {};
+    static bool savedOk = false;
+    if (on == fullscreen) return;
+    fullscreen = on;
+    if (on) {
+        savedOk = GetWindowRect(hwnd, &saved);
+        MONITORINFO mi = {sizeof mi};
+        GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+        SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
+                     mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED);
+    } else {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+        UINT flags = SWP_FRAMECHANGED | SWP_NOZORDER | (savedOk ? 0 : SWP_NOMOVE | SWP_NOSIZE);
+        SetWindowPos(hwnd, nullptr, saved.left, saved.top, saved.right - saved.left, saved.bottom - saved.top, flags);
+    }
+    ShowCursor(!on);  // so nas transicoes, para o contador do ShowCursor nao desandar
+}
+
 static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     switch (msg) {
-    case WM_KEYDOWN: case WM_KEYUP: keyDown[w & 0xFF] = msg == WM_KEYDOWN; return 0;
+    case WM_SYSKEYDOWN:
+        if (w == VK_RETURN && !(l & 0x40000000)) { setFullscreen(hwnd, !fullscreen); return 0; }  // Alt+Enter
+        break;
+    case WM_KEYDOWN:
+        if (!(l & 0x40000000)) {  // ignora a repeticao da tecla presa
+            if (w == VK_F11) { setFullscreen(hwnd, !fullscreen); return 0; }
+            if (w == VK_F3) { showFps = !showFps; return 0; }
+        }
+        keyDown[w & 0xFF] = true;
+        return 0;
+    case WM_KEYUP: keyDown[w & 0xFF] = false; return 0;
     case WM_KILLFOCUS: memset(keyDown, 0, sizeof keyDown); return 0;
     case WM_CLOSE: PostQuitMessage(0); return 0;
     }
@@ -1199,11 +1236,14 @@ static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 }
 
 int main(int argc, char** argv) {
-    bool check = false;
+    bool check = false, console = false;
     root = fs::u8path(DOODLE_ROOT);
     for (int i = 1; i < argc; i++) {
-        if (std::string(argv[i]) == "--check") check = true;
-        else root = argv[i];
+        std::string arg = argv[i];
+        if (arg == "--check") check = true;
+        else if (arg == "--console") console = true;          // liga direto em tela cheia
+        else if (arg == "--fps") showFps = fpsLog = true;     // contador na tela e uma linha por segundo no console
+        else root = arg;
     }
     registerSdk();
     if (check) return checkAll();
@@ -1220,6 +1260,7 @@ int main(int argc, char** argv) {
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
     HWND hwnd = CreateWindowW(L"Doodle", L"Doodle Simulator", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
                               r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
+    if (console) setFullscreen(hwnd, true);
     HDC dc = GetDC(hwnd);
     PIXELFORMATDESCRIPTOR pfd = {sizeof pfd, 1, PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER, PFD_TYPE_RGBA, 32};
     pfd.cDepthBits = 24;
@@ -1267,6 +1308,19 @@ int main(int argc, char** argv) {
         dt = std::min(std::chrono::duration<double>(now - last).count(), 0.1);
         last = now;
 
+        static double fpsAcc = 0, fpsPeak = 0;   // media de 1 s e o pior quadro do intervalo
+        static int fpsFrames = 0;
+        fpsAcc += dt;
+        fpsFrames++;
+        fpsPeak = std::max(fpsPeak, dt);
+        if (fpsAcc >= 1) {
+            fpsValue = fpsFrames / fpsAcc;
+            fpsWorst = fpsPeak;
+            fpsAcc = fpsPeak = 0;
+            fpsFrames = 0;
+            if (fpsLog) { printf("%.1f fps   pior quadro %.1f ms\n", fpsValue, fpsWorst * 1000); fflush(stdout); }
+        }
+
         RECT rc;
         GetClientRect(hwnd, &rc);
         int vw = std::min<int>(rc.right, rc.bottom * W / H), vh = vw * H / W;  // 4:3 letterbox
@@ -1281,6 +1335,13 @@ int main(int argc, char** argv) {
         elapsed += dt;
         beginFrameLighting();
         frame();
+        if (showFps) {
+            char buf[64];
+            snprintf(buf, sizeof buf, "%.0f fps  %.1f ms  pior %.1f", fpsValue, fpsValue > 0 ? 1000 / fpsValue : 0.0,
+                     fpsWorst * 1000);
+            rect(W - 232, 6, 226, 26, 0x000000, 0.45);
+            text(W - 226, 9, buf, 17, 0x9BE86B);
+        }
         updateAudio();
         SwapBuffers(dc);
     }
