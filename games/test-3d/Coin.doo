@@ -22,6 +22,10 @@ function on_collision(other) {
     }
 }
 
+function sumir() {   // trocou de fase: a moeda vai embora sem contar ponto
+    destroy_self()
+}
+
 function draw() {
     render.mesh(Mesh.Cylinder, position, vec3(90, spin, 0), vec3(0.8, 0.06, 0.8), 0xFFD23F)
 }

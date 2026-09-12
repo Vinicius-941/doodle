@@ -1,159 +1,436 @@
-object Test3D
+object Jogo
 
-// Fase de teste 3D: monta o cenário com spawn, o HUD e o menu de pausa (Canvas, prefab de UI do SDK),
-// e cuida do dia/noite. A câmera vem do Player (BasicCharacterController, prefab do SDK).
+// Vale das Moedas: o jogo-base 3D do Doodle, feito só com o SDK.
+// Pegue todas as moedas da fase antes do tempo acabar. Encostar numa bolota tira uma vida;
+// cair em cima dela derruba a bolota. São três fases, e a última é de noite.
+
+var estado = "titulo"   // titulo | jogando | fim
+var fase = 0
+var tempo = 0
+var total = 0           // moedas da fase
+var contadas = 0        // moedas já somadas aos pontos
+var pisadas = 0         // bolotas já somadas aos pontos
+var pontos = 0
+var recorde = 0
+var noite = false
+var ps1 = false
+var orbita = 0
+var coisas = []         // moedas e bolotas da fase: somem na troca
+var nomes = ["O vale", "Os morros", "A noite"]
 
 var player
 var chao
 var casa
 var lampada
-var total = 0
-var noite = false   // de noite: lua fraca, a lâmpada da casa acende e o jogador ganha uma lanterna
-var ps1 = false     // shader "ps1": vértices tremendo e textura afim, como no PS1 de verdade
 
-var hud             // Canvas sem controle: só mostra
-var moedas
-var parabens
-var marcaPs1
-var pausa           // Canvas do menu de pausa (Start)
+var hud
+var hFase
+var hMoedas
+var hPontos
+var hTempo
+var coracoes = []
+var faixa               // nome da fase, que some aos poucos
+
+var titulo
+var bJogar
+var bSairTitulo
+var tRecorde
+
+var pausa
 var bContinuar
-var bNoite
 var bPs1
 var sMusica
+var bTitulo
 var bSair
 
+var fim
+var tFim
+var tMotivo
+var tPontos
+var tRecordeFim
+var bDeNovo
+var bVoltar
+
 function create() {
-    chao = spawn(Terrain, vec3(0, 0, 0))     // vale plano no meio, morros em volta (prefab Terrain)
+    recorde = store.load("recorde", 0)
+    cenario()
+    player = spawn(Player, vec3(0, 1, 0))
+    interface()
+    mostrarTitulo()
+}
+
+// ---------- cenário fixo (fica de pé nas três fases) ----------
+
+function cenario() {
+    chao = spawn(Terrain, vec3(0, 0, 0))     // vale plano no meio, morros em volta
     chao.heightmap = "relevo.png"
     chao.size = vec3(90, 7, 90)
     chao.texture = "grama.png"
     chao.tiling = 22
     chao.build()
-    coin(vec3(0, chao.height_at(0, -31) + 1.2, -31))       // prêmio no alto do morro norte
 
-    for (var i = 0; i < 3; i += 1) {                          // escada de caixas: pule de uma pra outra
+    for (var i = 0; i < 3; i += 1) {         // escada de caixas
         var h = i + 1
-        block(vec3(5 + i * 2, h / 2, 6), vec3(2, h, 2), 0xFFFFFF, "caixa.png")
+        bloco(vec3(5 + i * 2, h / 2, 6), vec3(2, h, 2), 0xFFFFFF, "caixa.png")
     }
-    coin(vec3(9, 3.8, 6))                                     // prêmio no alto da escada
-
-    for (var i = 0; i < 12; i += 1) {                         // anel de pilares
+    for (var i = 0; i < 12; i += 1) {        // anel de pilares
         var a = i * math.pi / 6
-        block(vec3(math.sin(a) * 16, 2, math.cos(a) * 16), vec3(1, 4, 1), 0xC8C0B0, "")
+        bloco(vec3(math.sin(a) * 16, 2, math.cos(a) * 16), vec3(1, 4, 1), 0xC8C0B0, "")
     }
 
-    casa = spawn(Prop, vec3(-7, 1.6, 8))       // modelo .obj texturizado; o colisor vai de y = 0 a 3.2
+    casa = spawn(Prop, vec3(-7, 1.6, 8))     // modelo .obj com rádio tocando dentro
     casa.model = "casa.obj"
     casa.size = vec3(3, 3.2, 3)
-    casa.rotation = vec3(0, 90, 0)             // porta virada para o centro
-    casa.sound = "musica.wav"                  // rádio tocando dentro da casa: chegue perto pra ouvir
+    casa.rotation = vec3(0, 90, 0)
+    casa.sound = "musica.wav"
     casa.loop = true
     casa.range = 22
     casa.tocar()
 
-    var fumaca = spawn(ParticleSystem, vec3(-7, 3.4, 8))   // fumaça saindo do telhado (prefab do SDK, jato contínuo)
+    var fumaca = spawn(ParticleSystem, vec3(-7, 3.4, 8))
     fumaca.color = 0xB8B8B8
     fumaca.size = 0.3
     fumaca.speed = 1.2
     fumaca.spread = 0.25
-    fumaca.gravity = -1.5                                   // negativa: sobe
+    fumaca.gravity = -1.5
     fumaca.lifetime = 2.2
     fumaca.rate = 10
     fumaca.emitting = true
 
-    lampada = spawn(Light, vec3(-4.8, 1.8, 8))              // lâmpada na porta da casa (prefab Light, tipo Point)
+    lampada = spawn(Light, vec3(-4.8, 1.8, 8))   // acende só na fase da noite
     lampada.color = 0xFFB060
     lampada.range = 9
     lampada.intensity = 1.5
     lampada.enabled = false
+}
 
-    for (var i = 0; i < 6; i += 1) {                      // moedas em círculo
-        var a = i * math.pi / 3 + 0.5
-        coin(vec3(math.sin(a) * 9, 1, math.cos(a) * 9))
-    }
-    player = spawn(Player, vec3(0, 1, 0))
+function bloco(pos, tam, cor, textura) {
+    var b = spawn(Block, pos)
+    b.size = tam
+    b.color = cor
+    b.texture = textura
+}
 
+// ---------- telas ----------
+
+function interface() {
     hud = spawn(Canvas)
     hud.active = false
-    moedas = hud.text("", 20, 16, 26)
-    parabens = hud.text("Você pegou todas!", 20, 50, 22)
-    parabens.color = 0xFFE070
-    marcaPs1 = hud.text("PS1", 560, 16, 22)
-    marcaPs1.color = 0xFFE070
-    hud.text("Setas: andar/girar      Z: pular      Enter: pausa      Esc: HOME", 20, 448, 15)
+    hFase = hud.text("", 20, 14, 17)
+    hMoedas = hud.text("", 20, 36, 26)
+    hPontos = centrado(hud, "", 16, 24)
+    hTempo = hud.text("", 545, 14, 30)
+    for (var i = 0; i < 3; i += 1) {
+        push(coracoes, hud.image("coracao.png", 545 + i * 28, 52, 24, 24))
+    }
+    faixa = centrado(hud, "", 190, 40)
+    faixa.color = 0xFFE070
+
+    titulo = spawn(Canvas)
+    escurecer(titulo, 0.35)
+    centrado(titulo, "Vale das Moedas", 66, 58)
+    centrado(titulo, "Pegue as moedas antes do tempo acabar. Pule nas bolotas!", 150, 18)
+    bJogar = titulo.button("Jogar", 210, 220, 220, 46)
+    bSairTitulo = titulo.button("Sair", 210, 276, 220, 46)
+    tRecorde = centrado(titulo, "", 350, 20)
+    centrado(titulo, "Setas: andar e girar      Z: pular      Enter: pausa", 430, 15)
 
     pausa = spawn(Canvas)
-    var fundo = pausa.image("", 0, 0, 640, 480)            // painel escuro por cima do jogo
-    fundo.color = 0x000000
-    fundo.alpha = 0.6
-    var titulo = pausa.text("Pausa", 0, 110, 40)
-    titulo.w = 640
-    titulo.align = "center"
-    bContinuar = pausa.button("Continuar", 180, 180, 280, 44)
-    bNoite = pausa.button("", 180, 232, 280, 44)
-    bPs1 = pausa.button("", 180, 284, 280, 44)
-    sMusica = pausa.slider("Música", 180, 336, 280, 0, 100, 100)
-    bSair = pausa.button("Sair para o menu", 180, 388, 280, 44)
-    rotulos()
-    pausar(false)
+    escurecer(pausa, 0.6)
+    centrado(pausa, "Pausa", 96, 44)
+    bContinuar = pausa.button("Continuar", 180, 170, 280, 44)
+    bPs1 = pausa.button("", 180, 222, 280, 44)
+    sMusica = pausa.slider("Música", 180, 274, 280, 0, 100, 100)
+    bTitulo = pausa.button("Voltar ao título", 180, 326, 280, 44)
+    bSair = pausa.button("Sair do jogo", 180, 378, 280, 44)
+
+    fim = spawn(Canvas)
+    escurecer(fim, 0.65)
+    tFim = centrado(fim, "", 90, 48)
+    tMotivo = centrado(fim, "", 158, 20)
+    tPontos = centrado(fim, "", 200, 30)
+    tRecordeFim = centrado(fim, "", 246, 20)
+    tRecordeFim.color = 0xFFE070
+    bDeNovo = fim.button("Jogar de novo", 210, 310, 220, 46)
+    bVoltar = fim.button("Voltar ao título", 210, 366, 220, 46)
 }
 
-function block(pos, size, color, texture) {
-    var b = spawn(Block, pos)
-    b.size = size
-    b.color = color
-    b.texture = texture
+function centrado(canvas, s, y, tamanho) {
+    var t = canvas.text(s, 0, y, tamanho)
+    t.w = 640
+    t.align = "center"
+    return t
 }
 
-function coin(pos) {
-    spawn(Coin, pos)
-    total += 1
+function escurecer(canvas, a) {   // painel escuro por cima do jogo
+    var e = canvas.image("", 0, 0, 640, 480)
+    e.color = 0x000000
+    e.alpha = a
 }
 
-function update() {
-    moedas.text = "Moedas: " + player.coins + " / " + total
-    parabens.visible = player.coins == total
-    marcaPs1.visible = ps1
-
-    if (input.just_pressed(Button.Start)) { pausar(!pausa.visible) }
-    if (bContinuar.clicked) { pausar(false) }
-    if (bNoite.clicked) {
-        noite = !noite
-        lampada.enabled = noite
-        rotulos()
-    }
-    if (bPs1.clicked) {
-        ps1 = !ps1
-        rotulos()
-    }
-    if (sMusica.changed) { casa.volume = sMusica.value / 100 }
-    if (bSair.clicked) { destroy_self() }   // a raiz do jogo sumiu: o console volta ao menu
-
-    if (ps1) {
-        render.set_shader("ps1")
-    }
-    if (noite) {   // luzes valem só para este quadro: declaradas de novo a cada update
-        render.ambient(0x141A28)
-        render.light_directional(vec3(0.4, -1, 0.3), 0x6070B0, 0.5)   // lua
-        render.light_spot(player.position + vec3(0, 0.6, 0), player.forward() + vec3(0, -0.3, 0), 0xFFF0D0, 18, 50, 1.4)  // lanterna
+function menu(c, foco) {   // um menu por vez (nil = nenhum)
+    titulo.visible = false
+    titulo.active = false
+    pausa.visible = false
+    pausa.active = false
+    fim.visible = false
+    fim.active = false
+    if (c) {
+        c.visible = true
+        c.active = true
+        c.focus_on(foco)
     }
 }
 
-function pausar(p) {   // tempo parado e personagem sem controle enquanto o menu está aberto
-    pausa.visible = p
-    pausa.active = p
+// ---------- estados ----------
+
+function mostrarTitulo() {
+    estado = "titulo"
+    fase = 0
+    limpar()
+    time.set_scale(1)
+    noite = false
+    lampada.enabled = false
+    player.controllable = false
+    player.follow_camera = false
+    reposicionar()
+    tRecorde.text = "Recorde: " + recorde
+    hud.visible = false
+    menu(titulo, bJogar)
+}
+
+function comecar() {
+    pontos = 0
+    player.vidas = 3
+    carregarFase(1)
+}
+
+function carregarFase(n) {
+    limpar()
+    fase = n
+    estado = "jogando"
+    noite = n == 3
+    lampada.enabled = noite
+    player.coins = 0
+    player.pisoes = 0
+    player.controllable = true
+    player.follow_camera = true
+    contadas = 0
+    pisadas = 0
+    reposicionar()
+    hud.visible = true
+    faixa.text = "Fase " + n + " · " + nomes[n - 1]
+    faixa.alpha = 1
+    menu(nil, nil)
+    if (n == 1) {
+        tempo = 60
+        anel(6, 9, 0.5)
+        moedaEm(vec3(9, 3.8, 6))            // no alto da escada
+        bolota(0, -9, 2, 6, 0x7BD36B)
+        bolota(-11, -3, 2, 6, 0x7BD36B)
+    } else if (n == 2) {
+        tempo = 80
+        anel(5, 27, 0.3)                    // nos morros
+        anel(2, 6, 1.2)
+        moedaEm(vec3(9, 3.8, 6))
+        bolota(8, 2, 2.6, 7, 0xF0A040)
+        bolota(-8, -6, 2.6, 7, 0xF0A040)
+        bolota(20, -14, 2.6, 8, 0xF0A040)
+        bolota(-20, 12, 2.6, 8, 0xF0A040)
+    } else {
+        tempo = 95
+        anel(4, 28, 0.9)
+        anel(3, 12, 0.2)
+        moedaEm(vec3(-7, 1.2, 12))          // atrás da casa
+        bolota(6, 6, 3.1, 9, 0xB070F0)
+        bolota(-6, 8, 3.1, 9, 0xB070F0)
+        bolota(12, -10, 3.1, 9, 0xB070F0)
+        bolota(-14, -8, 3.1, 9, 0xB070F0)
+        bolota(24, 6, 3.1, 9, 0xB070F0)
+        bolota(-22, -18, 3.1, 9, 0xB070F0)
+    }
+}
+
+function terminar(venceu, motivo) {
+    estado = "fim"
+    player.controllable = false
+    if (venceu) {
+        tFim.text = "Você venceu!"
+        audio.play(1318, 400)
+    } else {
+        tFim.text = "Fim de jogo"
+        audio.play(196, 500)
+    }
+    tMotivo.text = motivo
+    tPontos.text = "Pontos: " + pontos
+    if (pontos > recorde) {
+        recorde = pontos
+        store.save("recorde", recorde)
+        tRecordeFim.text = "Novo recorde!"
+    } else {
+        tRecordeFim.text = "Recorde: " + recorde
+    }
+    menu(fim, bDeNovo)
+}
+
+function pausar(p) {
     player.controllable = !p
     if (p) {
         time.set_scale(0)
-        pausa.focus_on(bContinuar)
+        rotulos()
+        menu(pausa, bContinuar)
     } else {
         time.set_scale(1)
+        menu(nil, nil)
     }
 }
 
 function rotulos() {
-    if (noite) { bNoite.text = "Hora: noite" } else { bNoite.text = "Hora: dia" }
     if (ps1) { bPs1.text = "Efeito PS1: ligado" } else { bPs1.text = "Efeito PS1: desligado" }
+}
+
+// ---------- montagem das fases ----------
+
+function limpar() {
+    for (var i = 0; i < len(coisas); i += 1) {
+        if (coisas[i]) { coisas[i].sumir() }
+    }
+    coisas = []
+    total = 0
+}
+
+function anel(qtd, raio, giro) {   // moedas em círculo, acompanhando o relevo
+    for (var i = 0; i < qtd; i += 1) {
+        var a = i * 2 * math.pi / qtd + giro
+        moeda(math.sin(a) * raio, math.cos(a) * raio)
+    }
+}
+
+function moeda(x, z) {
+    var y = chao.height_at(x, z)
+    if (y == nil) { y = 0 }
+    moedaEm(vec3(x, y + 1.2, z))
+}
+
+function moedaEm(pos) {
+    push(coisas, spawn(Coin, pos))
+    total += 1
+}
+
+function bolota(x, z, velocidade, alcance, cor) {
+    var y = chao.height_at(x, z)
+    if (y == nil) { y = 0 }
+    var b = spawn(Blob, vec3(x, y + 0.6, z))
+    b.alvo = player
+    b.chao = chao
+    b.casa = b.position
+    b.velocidade = velocidade
+    b.alcance = alcance
+    b.cor = cor
+    push(coisas, b)
+}
+
+function reposicionar() {
+    player.position = vec3(0, 1, 0)
+    player.velocity = vec3(0, 0, 0)
+    player.heading = 0
+    player.camera_y = 1
+    player.invencivel = 0
+    player.atordoado = 0
+}
+
+// ---------- quadro a quadro ----------
+
+function update() {
+    if (estado == "titulo") {
+        orbita += time.unscaled_delta * 0.12       // câmera girando em volta do vale
+        render.camera(vec3(math.sin(orbita) * 30, 16, math.cos(orbita) * 30), vec3(0, 1, 0), 55)
+        if (bJogar.clicked) { comecar() }
+        if (bSairTitulo.clicked) { destroy_self() }
+    } else if (estado == "jogando") {
+        jogar()
+    } else {
+        if (bDeNovo.clicked) { comecar() }
+        if (bVoltar.clicked) { mostrarTitulo() }
+    }
+    luzes()
+    atualizarHud()
+}
+
+function jogar() {
+    if (input.just_pressed(Button.Start)) { pausar(!pausa.visible) }
+    if (pausa.visible) {
+        if (bContinuar.clicked) { pausar(false) }
+        if (bPs1.clicked) {
+            ps1 = !ps1
+            rotulos()
+        }
+        if (sMusica.changed) { casa.volume = sMusica.value / 100 }
+        if (bTitulo.clicked) {
+            pausar(false)
+            mostrarTitulo()
+        }
+        if (bSair.clicked) { destroy_self() }
+        return
+    }
+
+    tempo -= time.delta
+    if (player.coins > contadas) {
+        pontos += (player.coins - contadas) * 100
+        contadas = player.coins
+    }
+    if (player.pisoes > pisadas) {
+        pontos += (player.pisoes - pisadas) * 50
+        pisadas = player.pisoes
+    }
+
+    if (total > 0 && player.coins >= total) {
+        pontos += math.floor(tempo) * 10       // bônus pelo tempo que sobrou
+        if (fase < 3) {
+            audio.play(1046, 350)
+            carregarFase(fase + 1)
+        } else {
+            terminar(true, "Você limpou as três fases")
+        }
+    } else if (player.vidas <= 0) {
+        terminar(false, "Acabaram as vidas")
+    } else if (tempo <= 0) {
+        terminar(false, "O tempo acabou")
+    }
+}
+
+function luzes() {
+    if (ps1) { render.set_shader("ps1") }
+    if (noite) {
+        render.ambient(0x141A28)
+        render.light_directional(vec3(0.4, -1, 0.3), 0x6070B0, 0.5)   // lua
+        if (player.controllable) {                                     // lanterna do jogador
+            render.light_spot(player.position + vec3(0, 0.6, 0), player.forward() + vec3(0, -0.3, 0), 0xFFF0D0, 18, 50, 1.4)
+        }
+    }
+}
+
+function atualizarHud() {
+    if (fase > 0) {
+        hFase.text = "Fase " + fase + " · " + nomes[fase - 1]
+    }
+    hMoedas.text = "Moedas " + player.coins + " / " + total
+    hPontos.text = "" + pontos
+    hTempo.text = relogio(tempo)
+    if (tempo < 10) { hTempo.color = 0xFF6A6A } else { hTempo.color = 0xFFFFFF }
+    for (var i = 0; i < 3; i += 1) {
+        var c = coracoes[i]
+        c.visible = i < player.vidas
+    }
+    faixa.alpha = math.max(0, faixa.alpha - time.unscaled_delta * 0.5)
+}
+
+function relogio(s) {
+    var t = math.max(0, math.floor(s))
+    var m = math.floor(t / 60)
+    var r = t % 60
+    if (r < 10) { return m + ":0" + r }
+    return m + ":" + r
 }
 
 function draw() {

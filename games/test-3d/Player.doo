@@ -1,12 +1,64 @@
 object Player extends BasicCharacterController
 
-// O herói do teste: o personagem pronto do SDK (andar, pular, câmera) + as moedas coletadas.
+// O herói: o personagem pronto do SDK (andar, pular, câmera) + vidas, dano e olhos.
 var jump_sound = "pulo.wav"
+var color = 0x5FA8FF
 var coins = 0
+var pisoes = 0          // bolotas derrubadas nesta fase
+var vidas = 3
+var invencivel = 0      // segundos piscando depois de levar dano
+var atordoado = 0       // segundos sem controle, durante o empurrão
+var inicio = vec3(0, 1, 0)
 
 function update() {
-    super.update()
-    if (position.y < -20) {   // caiu pra fora do mapa
-        position = vec3(0, 2, 0)
+    var dt = time.delta
+    invencivel = math.max(0, invencivel - dt)
+    if (atordoado > 0) {   // o empurrão manda; a câmera continua seguindo
+        atordoado -= dt
+        camera()
+    } else {
+        super.update()
     }
+    if (position.y < -15 && controllable) {   // caiu pra fora do mapa
+        vidas -= 1
+        position = inicio
+        velocity = vec3(0, 0, 0)
+        invencivel = 2
+        audio.play(150, 250)
+    }
+}
+
+function ferir(de) {
+    if (invencivel > 0 || !controllable) { return }
+    vidas -= 1
+    invencivel = 2
+    atordoado = 0.4
+    var longe = position - de
+    var n = math.sqrt(longe.x * longe.x + longe.z * longe.z)
+    if (n > 0.01) {
+        velocity = vec3(longe.x / n * 9, 6, longe.z / n * 9)
+    } else {
+        velocity = vec3(0, 6, 0)
+    }
+    audio.play(150, 250)
+}
+
+function quicar() {   // pisou numa bolota
+    velocity.y = 9
+    pisoes += 1
+    audio.play(880, 90)
+}
+
+function draw() {
+    if (invencivel > 0 && math.floor(invencivel * 8) % 2 == 0) {   // pisca enquanto está invencível
+        return
+    }
+    super.draw()
+    var f = forward()
+    var lado = vec3(f.z, 0, -f.x)
+    var olho = position + f * 0.42 + vec3(0, 0.45, 0)
+    render.mesh(Mesh.Sphere, olho + lado * 0.17, vec3(0, 0, 0), 0.2, 0xFFFFFF)
+    render.mesh(Mesh.Sphere, olho - lado * 0.17, vec3(0, 0, 0), 0.2, 0xFFFFFF)
+    render.mesh(Mesh.Sphere, olho + lado * 0.17 + f * 0.08, vec3(0, 0, 0), 0.1, 0x101418)
+    render.mesh(Mesh.Sphere, olho - lado * 0.17 + f * 0.08, vec3(0, 0, 0), 0.1, 0x101418)
 }

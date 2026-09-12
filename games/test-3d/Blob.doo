@@ -1,0 +1,69 @@
+object Blob
+
+// Bolota: patrulha em círculo e persegue o jogador quando ele chega perto.
+// Encostar tira uma vida do jogador; cair em cima dela derruba a bolota.
+use SphereCollider
+
+var trigger = true    // não bloqueia: só avisa o contato
+var radius = 0.6
+var alvo              // o Player
+var chao              // o Terrain, para andar sobre o relevo
+var casa = vec3(0, 0, 0)   // centro da patrulha
+var velocidade = 2.5
+var alcance = 7       // distância em que começa a perseguir
+var cor = 0x7BD36B
+var olhando = vec3(0, 0, 1)
+var ang = 0
+var t = 0
+
+function update() {
+    var dt = time.delta
+    t += dt
+    ang += dt * 0.6
+    var destino = casa + vec3(math.sin(ang) * 3, 0, math.cos(ang) * 3)
+    if (alvo && alvo.controllable) {
+        var d = alvo.position - position
+        if (plano(d) < alcance) { destino = alvo.position }
+    }
+    var dir = destino - position
+    var n = plano(dir)
+    if (n > 0.1) {
+        olhando = vec3(dir.x / n, 0, dir.z / n)
+        position = position + olhando * velocidade * dt
+    }
+    var h = chao.height_at(position.x, position.z)
+    if (h != nil) { position.y = h + radius }
+}
+
+function plano(v) {   // comprimento no chão (ignora a altura)
+    return math.sqrt(v.x * v.x + v.z * v.z)
+}
+
+function on_collision(other) {
+    if (type(other) != Player) { return }
+    if (other.velocity.y < 0 && other.position.y - 1 > position.y - 0.2) {   // caiu por cima
+        var fx = spawn(ParticleSystem, position)
+        fx.color = cor
+        fx.size = 0.16
+        fx.burst(18)
+        other.quicar()
+        destroy_self()
+    } else {
+        other.ferir(position)
+    }
+}
+
+function sumir() {
+    destroy_self()
+}
+
+function draw() {
+    var squash = 1 + math.sin(t * 7) * 0.08
+    render.mesh(Mesh.Sphere, position, vec3(0, 0, 0), vec3(1.25, 1.05 * squash, 1.25), cor)
+    var lado = vec3(olhando.z, 0, -olhando.x)
+    var olho = position + olhando * 0.5 + vec3(0, 0.2, 0)
+    render.mesh(Mesh.Sphere, olho + lado * 0.2, vec3(0, 0, 0), 0.22, 0xFFFFFF)
+    render.mesh(Mesh.Sphere, olho - lado * 0.2, vec3(0, 0, 0), 0.22, 0xFFFFFF)
+    render.mesh(Mesh.Sphere, olho + lado * 0.2 + olhando * 0.08, vec3(0, 0, 0), 0.11, 0x101418)
+    render.mesh(Mesh.Sphere, olho - lado * 0.2 + olhando * 0.08, vec3(0, 0, 0), 0.11, 0x101418)
+}
