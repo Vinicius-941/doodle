@@ -17,4 +17,4 @@ function focusable() { return false }
 function activate() { return false }   // A apertado com o foco aqui; true = usou o botão
 function adjust(d) { return false }    // esquerda (-1) / direita (+1); true = usou, não move o foco
 function reset() {}                    // começo do quadro: apaga clicked/changed
-function remove() { destroy_self() }
+function remove() { instance_destroy() }

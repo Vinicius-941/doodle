@@ -1,13 +1,13 @@
 object Light
 
-// Luz pronta do SDK: Light.Point (lâmpada), Light.Spot (lanterna, holofote) ou Light.Directional (sol, lua).
-//     var lampada = spawn(Light, vec3(0, 3, 0))
+// Luz pronta do SDK: lt_point (lâmpada), lt_spot (lanterna, holofote) ou lt_directional (sol, lua).
+//     var lampada = instance_create(Light, vec3(0, 3, 0))
 //     lampada.color = 0xFFAA55
 //     lampada.range = 10
 // Até 8 luzes por quadro. Sem nenhuma luz na cena, o console usa um sol padrão.
 
 var position = vec3(0, 0, 0)
-var type = Light.Point
+var object_name = lt_point
 var enabled = true
 var color = 0xFFFFFF
 var intensity = 1
@@ -15,15 +15,15 @@ var range = 10                  // Point/Spot: a luz some suavemente até essa d
 var direction = vec3(0, -1, 0)  // Spot/Directional: para onde a luz aponta
 var angle = 45                  // Spot: abertura do cone, em graus
 
-function update() {
+function step() {
     if (!enabled) {
         return
     }
-    if (type == Light.Directional) {
-        render.light_directional(direction, color, intensity)
-    } else if (type == Light.Spot) {
-        render.light_spot(position, direction, color, range, angle, intensity)
+    if (object_name == lt_directional) {
+        light_directional(direction, color, intensity)
+    } else if (object_name == lt_spot) {
+        light_spot(position, direction, color, range, angle, intensity)
     } else {
-        render.light_point(position, color, range, intensity)
+        light_point(position, color, range, intensity)
     }
 }

@@ -2,7 +2,7 @@ object Terrain
 
 // Terreno do SDK: chão com relevo feito de uma imagem em tons de cinza (branco = alto, preto = baixo;
 // o topo da imagem fica do lado -z). Sem heightmap, é um plano. Quem tem Rigidbody anda por cima.
-//     var chao = spawn(Terrain, vec3(0, 0, 0))
+//     var chao = instance_create(Terrain, vec3(0, 0, 0))
 //     chao.heightmap = "relevo.png"
 //     chao.size = vec3(80, 6, 80)    // largura, altura máxima, profundidade
 //     chao.texture = "grama.png"
@@ -17,14 +17,14 @@ var color = 0xFFFFFF
 
 function build() {
     if (heightmap != "") {
-        heights = render.heightmap(heightmap)
+        heights = heightmap_read(heightmap)
     }
 }
 
 function height_at(x, z) {   // altura do chão em (x, z), ou nil fora do terreno: bom para posicionar objetos
-    return physics.terrain_height(x, z)
+    return terrain_height(x, z)
 }
 
 function draw() {
-    render.terrain(position, size, heights, color, texture, tiling)
+    draw_terrain(position, size, heights, color, texture, tiling)
 }

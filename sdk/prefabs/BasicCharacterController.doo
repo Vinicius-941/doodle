@@ -1,9 +1,9 @@
 object BasicCharacterController
 
 // Personagem pronto do SDK (como os Starter Assets da Unity): anda, gira, pula e tem câmera em 3ª pessoa.
-// Use direto com spawn(BasicCharacterController, pos) ou estenda:
+// Use direto com instance_create(BasicCharacterController, pos) ou estenda:
 //     object Heroi extends BasicCharacterController
-// e sobrescreva o que quiser (chame super.update() para manter o controle e a câmera).
+// e sobrescreva o que quiser (chame super.step() para manter o controle e a câmera).
 use Rigidbody
 use CapsuleCollider
 
@@ -18,13 +18,15 @@ var controllable = true    // false: ignora o controle (menus, cenas)
 var follow_camera = true   // câmera atrás do personagem
 var camera_distance = 7
 var camera_height = 3
+var camera_yaw = 0         // giro da câmera em volta do personagem (analógico direito)
+var look_speed = 120       // graus por segundo do analógico direito
 var camera_y = 0           // altura da câmera, que segue com atraso (assim o pulo aparece na tela)
 
 function create() {
     camera_y = position.y
 }
 
-function update() {
+function step() {
     if (controllable) {
         control()
     }
@@ -33,35 +35,40 @@ function update() {
     }
 }
 
-function control() {   // controle "tank" estilo PS1: esquerda/direita giram, cima/baixo andam, A pula
-    var dt = time.delta
-    if (input.pressed(Button.Left))  { heading += turn_speed * dt }
-    if (input.pressed(Button.Right)) { heading -= turn_speed * dt }
-    var speed = 0
-    if (input.pressed(Button.Up))   { speed = move_speed }
-    if (input.pressed(Button.Down)) { speed = -back_speed }
+function control() {   // controle "tank" estilo PS1: esquerda/direita giram, cima/baixo andam, A pula.
+                       // Lê o analógico esquerdo, que sem controle são as próprias setas.
+    var dt = delta_time
+    heading -= stick_x() * turn_speed * dt
+    var frente = stick_y()
+    var speed = frente * move_speed
+    if (frente < 0) { speed = frente * back_speed }
     var move = forward() * speed
     velocity.x = move.x
     velocity.z = move.z
-    if (input.just_pressed(Button.A) && grounded) {
+    if (button_check_pressed(btn_a) && grounded) {
         velocity.y = jump_speed
         if (jump_sound != "") {
-            audio.play(jump_sound)
+            audio_play_sound(jump_sound)
         }
     }
 }
 
-function camera() {
-    camera_y += (position.y - camera_y) * math.min(1, 4 * time.delta)
+function camera() {   // o analógico direito gira em volta do personagem e sobe/desce o ponto de vista
+    var dt = delta_time
+    camera_yaw += look_x() * look_speed * dt
+    camera_height = max(-1, min(9, camera_height + look_y() * 5 * dt))
+    camera_y += (position.y - camera_y) * min(1, 4 * dt)
     var target = vec3(position.x, camera_y + 0.5, position.z)
-    render.camera(target - forward() * camera_distance + vec3(0, camera_height, 0), target, 60)
+    var rad = (heading + camera_yaw) * pi / 180
+    var atras = vec3(sin(rad), 0, cos(rad)) * camera_distance
+    camera_set(target - atras + vec3(0, camera_height, 0), target, 60)
 }
 
 function forward() {
-    var rad = heading * math.pi / 180
-    return vec3(math.sin(rad), 0, math.cos(rad))
+    var rad = heading * pi / 180
+    return vec3(sin(rad), 0, cos(rad))
 }
 
 function draw() {
-    render.mesh(Mesh.Capsule, position, vec3(0, heading, 0), 1, color)
+    draw_mesh(mesh_capsule, position, vec3(0, heading, 0), 1, color)
 }

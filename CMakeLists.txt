@@ -8,7 +8,7 @@ if(MSVC)
 endif()
 
 # Doo language: compiler + VM (no platform code; this is what gets ported in Phase 3)
-add_library(doo STATIC doo-compiler/compiler.cpp vm-runtime/vm.cpp)
+add_library(doo STATIC doo-compiler/compiler.cpp vm-runtime/vm.cpp vm-runtime/stdlib.cpp)
 target_include_directories(doo PUBLIC doo-compiler vm-runtime)
 
 # SDK logic shared by the simulator and the tests (physics, .obj models, .wav sounds, saves); also platform-free

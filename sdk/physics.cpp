@@ -20,7 +20,7 @@ void registerPhysics(VM& vm) {
     vm.components["Rigidbody"] = {{"position", zero}, {"velocity", zero}, {"gravity", Value(20.0)}, {"grounded", no}};
     // heights: rows of 0..1 (nil = flat) spread over size.x × size.z around position, scaled by size.y
     vm.components["TerrainCollider"] = {{"position", zero}, {"size", Value(Vec3{10, 1, 10})}, {"heights", Value()}};
-    vm.addNative("physics.terrain_height", [](Instance& self, std::vector<Value>& a) {  // (x, z) on the caller's terrain
+    vm.addNative("terrain_height", [](Instance& self, std::vector<Value>& a) {  // (x, z) on the caller's terrain
         double y;
         return terrainHeight(self, argNum(a, 0), argNum(a, 1), y) ? Value(y) : Value();  // nil outside it
     });
@@ -178,7 +178,7 @@ void physicsStep(VM& vm, const std::vector<std::shared_ptr<Instance>>& scene, do
         }
     }
     for (auto& [x, y] : hits) {
-        if (x->alive && y->alive) vm.call(*x, "on_collision", {Value(Ref{y})});
-        if (x->alive && y->alive) vm.call(*y, "on_collision", {Value(Ref{x})});
+        if (x->alive && y->alive) vm.call(*x, "collision", {Value(Ref{y})});
+        if (x->alive && y->alive) vm.call(*y, "collision", {Value(Ref{x})});
     }
 }

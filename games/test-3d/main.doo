@@ -52,9 +52,9 @@ var bDeNovo
 var bVoltar
 
 function create() {
-    recorde = store.load("recorde", 0)
+    recorde = save_get("recorde", 0)
     cenario()
-    player = spawn(Player, vec3(0, 1, 0))
+    player = instance_create(Player, vec3(0, 1, 0))
     interface()
     mostrarTitulo()
 }
@@ -62,7 +62,7 @@ function create() {
 // ---------- cenário fixo (fica de pé nas três fases) ----------
 
 function cenario() {
-    chao = spawn(Terrain, vec3(0, 0, 0))     // vale plano no meio, morros em volta
+    chao = instance_create(Terrain, vec3(0, 0, 0))     // vale plano no meio, morros em volta
     chao.heightmap = "relevo.png"
     chao.size = vec3(90, 7, 90)
     chao.texture = "grama.png"
@@ -74,11 +74,11 @@ function cenario() {
         bloco(vec3(5 + i * 2, h / 2, 6), vec3(2, h, 2), 0xFFFFFF, "caixa.png")
     }
     for (var i = 0; i < 12; i += 1) {        // anel de pilares
-        var a = i * math.pi / 6
-        bloco(vec3(math.sin(a) * 16, 2, math.cos(a) * 16), vec3(1, 4, 1), 0xC8C0B0, "")
+        var a = i * pi / 6
+        bloco(vec3(sin(a) * 16, 2, cos(a) * 16), vec3(1, 4, 1), 0xC8C0B0, "")
     }
 
-    casa = spawn(Prop, vec3(-7, 1.6, 8))     // modelo .obj com rádio tocando dentro
+    casa = instance_create(Prop, vec3(-7, 1.6, 8))     // modelo .obj com rádio tocando dentro
     casa.model = "casa.obj"
     casa.size = vec3(3, 3.2, 3)
     casa.rotation = vec3(0, 90, 0)
@@ -87,7 +87,7 @@ function cenario() {
     casa.range = 22
     casa.tocar()
 
-    var fumaca = spawn(ParticleSystem, vec3(-7, 3.4, 8))
+    var fumaca = instance_create(ParticleSystem, vec3(-7, 3.4, 8))
     fumaca.color = 0xB8B8B8
     fumaca.size = 0.3
     fumaca.speed = 1.2
@@ -97,7 +97,7 @@ function cenario() {
     fumaca.rate = 10
     fumaca.emitting = true
 
-    lampada = spawn(Light, vec3(-4.8, 1.8, 8))   // acende só na fase da noite
+    lampada = instance_create(Light, vec3(-4.8, 1.8, 8))   // acende só na fase da noite
     lampada.color = 0xFFB060
     lampada.range = 9
     lampada.intensity = 1.5
@@ -105,7 +105,7 @@ function cenario() {
 }
 
 function bloco(pos, tam, cor, textura) {
-    var b = spawn(Block, pos)
+    var b = instance_create(Block, pos)
     b.size = tam
     b.color = cor
     b.texture = textura
@@ -114,19 +114,19 @@ function bloco(pos, tam, cor, textura) {
 // ---------- telas ----------
 
 function interface() {
-    hud = spawn(Canvas)
+    hud = instance_create(Canvas)
     hud.active = false
     hFase = hud.text("", 20, 14, 17)
     hMoedas = hud.text("", 20, 36, 26)
     hPontos = centrado(hud, "", 16, 24)
     hTempo = hud.text("", 545, 14, 30)
     for (var i = 0; i < 3; i += 1) {
-        push(coracoes, hud.image("coracao.png", 545 + i * 28, 52, 24, 24))
+        array_push(coracoes, hud.image("coracao.png", 545 + i * 28, 52, 24, 24))
     }
     faixa = centrado(hud, "", 190, 40)
     faixa.color = 0xFFE070
 
-    titulo = spawn(Canvas)
+    titulo = instance_create(Canvas)
     escurecer(titulo, 0.35)
     centrado(titulo, "Vale das Moedas", 66, 58)
     centrado(titulo, "Pegue as moedas antes do tempo acabar. Pule nas bolotas!", 150, 18)
@@ -135,7 +135,7 @@ function interface() {
     tRecorde = centrado(titulo, "", 350, 20)
     centrado(titulo, "Setas: andar e girar      Z: pular      Enter: pausa", 430, 15)
 
-    pausa = spawn(Canvas)
+    pausa = instance_create(Canvas)
     escurecer(pausa, 0.6)
     centrado(pausa, "Pausa", 96, 44)
     bContinuar = pausa.button("Continuar", 180, 170, 280, 44)
@@ -144,7 +144,7 @@ function interface() {
     bTitulo = pausa.button("Voltar ao título", 180, 326, 280, 44)
     bSair = pausa.button("Sair do jogo", 180, 378, 280, 44)
 
-    fim = spawn(Canvas)
+    fim = instance_create(Canvas)
     escurecer(fim, 0.65)
     tFim = centrado(fim, "", 90, 48)
     tMotivo = centrado(fim, "", 158, 20)
@@ -188,7 +188,7 @@ function mostrarTitulo() {
     estado = "titulo"
     fase = 0
     limpar()
-    time.set_scale(1)
+    time_set_scale(1)
     noite = false
     lampada.enabled = false
     player.controllable = false
@@ -256,16 +256,16 @@ function terminar(venceu, motivo) {
     player.controllable = false
     if (venceu) {
         tFim.text = "Você venceu!"
-        audio.play(1318, 400)
+        audio_play_tone(1318, 400)
     } else {
         tFim.text = "Fim de jogo"
-        audio.play(196, 500)
+        audio_play_tone(196, 500)
     }
     tMotivo.text = motivo
     tPontos.text = "Pontos: " + pontos
     if (pontos > recorde) {
         recorde = pontos
-        store.save("recorde", recorde)
+        save_set("recorde", recorde)
         tRecordeFim.text = "Novo recorde!"
     } else {
         tRecordeFim.text = "Recorde: " + recorde
@@ -276,11 +276,11 @@ function terminar(venceu, motivo) {
 function pausar(p) {
     player.controllable = !p
     if (p) {
-        time.set_scale(0)
+        time_set_scale(0)
         rotulos()
         menu(pausa, bContinuar)
     } else {
-        time.set_scale(1)
+        time_set_scale(1)
         menu(nil, nil)
     }
 }
@@ -292,7 +292,7 @@ function rotulos() {
 // ---------- montagem das fases ----------
 
 function limpar() {
-    for (var i = 0; i < len(coisas); i += 1) {
+    for (var i = 0; i < array_length(coisas); i += 1) {
         if (coisas[i]) { coisas[i].sumir() }
     }
     coisas = []
@@ -301,8 +301,8 @@ function limpar() {
 
 function anel(qtd, raio, giro) {   // moedas em círculo, acompanhando o relevo
     for (var i = 0; i < qtd; i += 1) {
-        var a = i * 2 * math.pi / qtd + giro
-        moeda(math.sin(a) * raio, math.cos(a) * raio)
+        var a = i * 2 * pi / qtd + giro
+        moeda(sin(a) * raio, cos(a) * raio)
     }
 }
 
@@ -313,21 +313,21 @@ function moeda(x, z) {
 }
 
 function moedaEm(pos) {
-    push(coisas, spawn(Coin, pos))
+    array_push(coisas, instance_create(Coin, pos))
     total += 1
 }
 
 function bolota(x, z, velocidade, alcance, cor) {
     var y = chao.height_at(x, z)
     if (y == nil) { y = 0 }
-    var b = spawn(Blob, vec3(x, y + 0.6, z))
+    var b = instance_create(Blob, vec3(x, y + 0.6, z))
     b.alvo = player
     b.chao = chao
     b.casa = b.position
     b.velocidade = velocidade
     b.alcance = alcance
     b.cor = cor
-    push(coisas, b)
+    array_push(coisas, b)
 }
 
 function reposicionar() {
@@ -341,12 +341,12 @@ function reposicionar() {
 
 // ---------- quadro a quadro ----------
 
-function update() {
+function step() {
     if (estado == "titulo") {
-        orbita += time.unscaled_delta * 0.12       // câmera girando em volta do vale
-        render.camera(vec3(math.sin(orbita) * 30, 16, math.cos(orbita) * 30), vec3(0, 1, 0), 55)
+        orbita += delta_time_real * 0.12       // câmera girando em volta do vale
+        camera_set(vec3(sin(orbita) * 30, 16, cos(orbita) * 30), vec3(0, 1, 0), 55)
         if (bJogar.clicked) { comecar() }
-        if (bSairTitulo.clicked) { destroy_self() }
+        if (bSairTitulo.clicked) { instance_destroy() }
     } else if (estado == "jogando") {
         jogar()
     } else {
@@ -358,7 +358,7 @@ function update() {
 }
 
 function jogar() {
-    if (input.just_pressed(Button.Start)) { pausar(!pausa.visible) }
+    if (button_check_pressed(btn_start)) { pausar(!pausa.visible) }
     if (pausa.visible) {
         if (bContinuar.clicked) { pausar(false) }
         if (bPs1.clicked) {
@@ -370,11 +370,11 @@ function jogar() {
             pausar(false)
             mostrarTitulo()
         }
-        if (bSair.clicked) { destroy_self() }
+        if (bSair.clicked) { instance_destroy() }
         return
     }
 
-    tempo -= time.delta
+    tempo -= delta_time
     if (player.coins > contadas) {
         pontos += (player.coins - contadas) * 100
         contadas = player.coins
@@ -385,9 +385,9 @@ function jogar() {
     }
 
     if (total > 0 && player.coins >= total) {
-        pontos += math.floor(tempo) * 10       // bônus pelo tempo que sobrou
+        pontos += floor(tempo) * 10       // bônus pelo tempo que sobrou
         if (fase < 3) {
-            audio.play(1046, 350)
+            audio_play_tone(1046, 350)
             carregarFase(fase + 1)
         } else {
             terminar(true, "Você limpou as três fases")
@@ -400,12 +400,12 @@ function jogar() {
 }
 
 function luzes() {
-    if (ps1) { render.set_shader("ps1") }
+    if (ps1) { shader_set("ps1") }
     if (noite) {
-        render.ambient(0x141A28)
-        render.light_directional(vec3(0.4, -1, 0.3), 0x6070B0, 0.5)   // lua
+        light_ambient(0x141A28)
+        light_directional(vec3(0.4, -1, 0.3), 0x6070B0, 0.5)   // lua
         if (player.controllable) {                                     // lanterna do jogador
-            render.light_spot(player.position + vec3(0, 0.6, 0), player.forward() + vec3(0, -0.3, 0), 0xFFF0D0, 18, 50, 1.4)
+            light_spot(player.position + vec3(0, 0.6, 0), player.forward() + vec3(0, -0.3, 0), 0xFFF0D0, 18, 50, 1.4)
         }
     }
 }
@@ -422,12 +422,12 @@ function atualizarHud() {
         var c = coracoes[i]
         c.visible = i < player.vidas
     }
-    faixa.alpha = math.max(0, faixa.alpha - time.unscaled_delta * 0.5)
+    faixa.alpha = max(0, faixa.alpha - delta_time_real * 0.5)
 }
 
 function relogio(s) {
-    var t = math.max(0, math.floor(s))
-    var m = math.floor(t / 60)
+    var t = max(0, floor(s))
+    var m = floor(t / 60)
     var r = t % 60
     if (r < 10) { return m + ":0" + r }
     return m + ":" + r
@@ -435,8 +435,8 @@ function relogio(s) {
 
 function draw() {
     if (noite) {
-        render.clear(0x0A0F1E)
+        draw_clear(0x0A0F1E)
     } else {
-        render.clear(0x7FB2E5)
+        draw_clear(0x7FB2E5)
     }
 }

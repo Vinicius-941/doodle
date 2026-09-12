@@ -5,7 +5,7 @@ object Image extends UIElement
 var path = ""
 
 function paint(focused, t) {
-    if (path == "" || !render.image(path, x, y, w, h, alpha)) {
-        render.rect(x, y, w, h, color, alpha)
+    if (path == "" || !draw_sprite(path, x, y, w, h, alpha)) {
+        draw_rectangle(x, y, w, h, color, alpha)
     }
 }

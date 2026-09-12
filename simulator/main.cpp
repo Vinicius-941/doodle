@@ -62,6 +62,7 @@ static Program firmware, game;
 static Program* active = &firmware;
 static std::string crash, pendingLaunch;
 static bool keyDown[256], held[NBUTTONS], was[NBUTTONS];
+static double stickX, stickY, lookX, lookY;  // analógicos, -1..1 (y positivo = para cima/para frente)
 static bool showFps = false, fpsLog = false;  // F3 (ou --fps): contador de quadros
 static double fpsValue = 0, fpsWorst = 0;
 static double dt = 0;         // real seconds since the last frame
@@ -581,6 +582,25 @@ static void updateAudio() {
 
 // ---------- input ----------
 
+// Analógico do XInput em -1..1, com zona morta radial: dentro dela o valor é 0, e fora dela recomeça do 0
+// (sem isso o eixo pula de 0 para ~0.25 quando o dedo passa da zona morta).
+static void axes(short rx, short ry, int deadzone, double& x, double& y) {
+    double fx = rx / 32767.0, fy = ry / 32767.0, m = std::sqrt(fx * fx + fy * fy), d = deadzone / 32767.0;
+    if (m <= d) {
+        x = y = 0;
+        return;
+    }
+    double k = std::min(1.0, (m - d) / (1 - d)) / m;
+    x = fx * k;
+    y = fy * k;
+}
+
+// Teclado no lugar do analógico: digital, então -1 ou 1.
+static void keys(int left, int right, int down, int up, double& x, double& y) {
+    if (keyDown[left] != keyDown[right]) x = keyDown[right] ? 1 : -1;
+    if (keyDown[down] != keyDown[up]) y = keyDown[up] ? 1 : -1;
+}
+
 static void pollInput() {
     // ponytail: an empty XInput slot is slow to query, so a missing pad is re-checked every ~2s
     static bool padConnected = true;
@@ -603,6 +623,10 @@ static void pollInput() {
         held[BTN_LEFT] |= g.sThumbLX < -dz;
         held[BTN_RIGHT] |= g.sThumbLX > dz;
     }
+    axes(pad ? g.sThumbLX : 0, pad ? g.sThumbLY : 0, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE, stickX, stickY);
+    axes(pad ? g.sThumbRX : 0, pad ? g.sThumbRY : 0, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE, lookX, lookY);
+    keys(VK_LEFT, VK_RIGHT, VK_DOWN, VK_UP, stickX, stickY);  // sem controle, as setas fazem o analógico esquerdo
+    keys('J', 'L', 'K', 'I', lookX, lookY);                   // ...e IJKL, o direito
 }
 
 // ---------- programs: firmware and games ----------
@@ -952,14 +976,18 @@ static void drawPart(GLuint list, GLuint tex, Vec3 rgb) {  // lit color x textur
 static double opt(Args& a, size_t i, double fallback) { return i < a.size() ? argNum(a, i) : fallback; }
 
 static void registerSdk() {
-    for (int i = 0; i < NBUTTONS; i++) vm.constants["Button." + std::string(buttonNames[i])] = Value(double(i));
-    for (int i = 0; i < NMESHES; i++) vm.constants["Mesh." + std::string(meshNames[i])] = Value(double(i));
-    vm.constants["Light.Directional"] = Value(double(LIGHT_DIRECTIONAL));
-    vm.constants["Light.Point"] = Value(double(LIGHT_POINT));
-    vm.constants["Light.Spot"] = Value(double(LIGHT_SPOT));
+    auto lower = [](std::string s) {  // btn_a, mesh_cube: constantes em minúsculo, como as da GML
+        for (char& c : s) c = (char)tolower((unsigned char)c);
+        return s;
+    };
+    for (int i = 0; i < NBUTTONS; i++) vm.constants["btn_" + lower(buttonNames[i])] = Value(double(i));
+    for (int i = 0; i < NMESHES; i++) vm.constants["mesh_" + lower(meshNames[i])] = Value(double(i));
+    vm.constants["lt_directional"] = Value(double(LIGHT_DIRECTIONAL));
+    vm.constants["lt_point"] = Value(double(LIGHT_POINT));
+    vm.constants["lt_spot"] = Value(double(LIGHT_SPOT));
     registerPhysics(vm);
 
-    vm.addNative("spawn", [](Instance&, Args& a) {  // (Object, position?) -> ref to the new instance
+    vm.addNative("instance_create", [](Instance&, Args& a) {  // (Object, position?) -> ref to the new instance
         std::string name = str(a, 0);
         auto it = active->objects.find(name);
         if (it == active->objects.end()) throw std::runtime_error("o objeto '" + name + "' não existe neste programa");
@@ -967,22 +995,22 @@ static void registerSdk() {
         return Value(Ref{spawnIn(*active, it->second, a.size() > 1 ? &pos : nullptr)});
     });
 
-    vm.addNative("rgb", [](Instance&, Args& a) {
+    vm.addNative("make_color_rgb", [](Instance&, Args& a) {
         auto c = [&](size_t i) { return std::clamp((int)argNum(a, i), 0, 255); };
         return Value(double(c(0) << 16 | c(1) << 8 | c(2)));
     });
-    vm.addNative("render.clear", [](Instance&, Args& a) {  // fills the screen (scissored to it) and resets depth
+    vm.addNative("draw_clear", [](Instance&, Args& a) {  // fills the screen (scissored to it) and resets depth
         int c = (int)argNum(a, 0);
         glClearColor((c >> 16 & 255) / 255.f, (c >> 8 & 255) / 255.f, (c & 255) / 255.f, 1);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         return Value();
     });
     // 2D calls take an optional last `alpha` (0..1, default 1) for fades and translucent panels
-    vm.addNative("render.rect", [](Instance&, Args& a) {  // (x, y, w, h, color, alpha)
+    vm.addNative("draw_rectangle", [](Instance&, Args& a) {  // (x, y, w, h, color, alpha)
         rect(argNum(a, 0), argNum(a, 1), argNum(a, 2), argNum(a, 3), argNum(a, 4), opt(a, 5, 1));
         return Value();
     });
-    vm.addNative("render.gradient", [](Instance&, Args& a) {  // (x, y, w, h, top color, bottom color, top alpha, bottom alpha)
+    vm.addNative("draw_gradient", [](Instance&, Args& a) {  // (x, y, w, h, top color, bottom color, top alpha, bottom alpha)
         double x = argNum(a, 0), y = argNum(a, 1), w = argNum(a, 2), h = argNum(a, 3);
         mode2D();
         glBegin(GL_QUADS);
@@ -993,12 +1021,12 @@ static void registerSdk() {
         glEnd();
         return Value();
     });
-    vm.addNative("render.text", [](Instance&, Args& a) {  // (x, y, text, size, color, alpha)
+    vm.addNative("draw_text", [](Instance&, Args& a) {  // (x, y, text, size, color, alpha)
         text(argNum(a, 0), argNum(a, 1), str(a, 2), argNum(a, 3), argNum(a, 4), opt(a, 5, 1));
         return Value();
     });
-    vm.addNative("render.text_width", [](Instance&, Args& a) { return Value(textWidth(str(a, 0), argNum(a, 1))); });
-    vm.addNative("render.image", [](Instance&, Args& a) {  // (path, x, y, w, h, alpha) -> false if the file is missing
+    vm.addNative("string_width", [](Instance&, Args& a) { return Value(textWidth(str(a, 0), argNum(a, 1))); });
+    vm.addNative("draw_sprite", [](Instance&, Args& a) {  // (path, x, y, w, h, alpha) -> false if the file is missing
         const Image& img = image(active->base / fs::u8path(str(a, 0)));
         if (!img.tex) return Value(false);
         double x = argNum(a, 1), y = argNum(a, 2), w = argNum(a, 3), h = argNum(a, 4);
@@ -1019,7 +1047,7 @@ static void registerSdk() {
     });
 
     // ponytail: perspective only; add an orthographic variant when a game needs it
-    vm.addNative("render.camera", [](Instance&, Args& a) {  // (position, target, fov = 60)
+    vm.addNative("camera_set", [](Instance&, Args& a) {  // (position, target, fov = 60)
         cam = {argVec(a, 0), argVec(a, 1), a.size() > 2 ? argNum(a, 2) : 60};
         mode = -1;
         return Value();
@@ -1032,22 +1060,22 @@ static void registerSdk() {
         mode = -1;
         return Value(true);
     };
-    vm.addNative("render.light_directional", [light](Instance&, Args& a) {  // (direction, color, intensity = 1)
+    vm.addNative("light_directional", [light](Instance&, Args& a) {  // (direction, color, intensity = 1)
         return light({LIGHT_DIRECTIONAL, {}, argVec(a, 0), rgb01(argNum(a, 1))}, opt(a, 2, 1));
     });
-    vm.addNative("render.light_point", [light](Instance&, Args& a) {  // (position, color, range, intensity = 1)
+    vm.addNative("light_point", [light](Instance&, Args& a) {  // (position, color, range, intensity = 1)
         return light({LIGHT_POINT, argVec(a, 0), {}, rgb01(argNum(a, 1)), argNum(a, 2)}, opt(a, 3, 1));
     });
-    vm.addNative("render.light_spot", [light](Instance&, Args& a) {  // (position, direction, color, range, angle = 45, intensity = 1)
+    vm.addNative("light_spot", [light](Instance&, Args& a) {  // (position, direction, color, range, angle = 45, intensity = 1)
         return light({LIGHT_SPOT, argVec(a, 0), argVec(a, 1), rgb01(argNum(a, 2)), argNum(a, 3), opt(a, 4, 45)}, opt(a, 5, 1));
     });
-    vm.addNative("render.ambient", [](Instance&, Args& a) {  // (color) light everywhere, even in shadow
+    vm.addNative("light_ambient", [](Instance&, Args& a) {  // (color) light everywhere, even in shadow
         ambient = rgb01(argNum(a, 0));
         mode = -1;
         return Value();
     });
     // ("padrao" | "ps1" | "name") for this frame's 3D; "name" = name.vert and/or name.frag in the game folder
-    vm.addNative("render.set_shader", [](Instance&, Args& a) {
+    vm.addNative("shader_set", [](Instance&, Args& a) {
         if (!shadersOk) return Value(false);
         std::string name = str(a, 0);
         std::string key = name == "padrao" || name == "ps1" ? name : (active->base / fs::u8path(name)).u8string();
@@ -1068,7 +1096,7 @@ static void registerSdk() {
     });
 
     // Terrain (see the Terrain prefab): heights = rows of 0..1, or nil for a flat plane
-    vm.addNative("render.terrain", [](Instance&, Args& a) {  // (position, size, heights, color, texture = "", tiling = 1)
+    vm.addNative("draw_terrain", [](Instance&, Args& a) {  // (position, size, heights, color, texture = "", tiling = 1)
         Vec3 p = argVec(a, 0), s = argVec(a, 1);
         auto rows = a.size() > 2 ? std::get_if<std::shared_ptr<Array>>(&a[2]) : nullptr;
         GLuint list = terrainMesh(rows ? *rows : nullptr, s, opt(a, 5, 1));
@@ -1080,7 +1108,7 @@ static void registerSdk() {
         glPopMatrix();
         return Value();
     });
-    vm.addNative("render.heightmap", [](Instance&, Args& a) {  // ("relevo.png") -> rows of 0..1 (brightness), max 129 x 129
+    vm.addNative("heightmap_read", [](Instance&, Args& a) {  // ("relevo.png") -> rows of 0..1 (brightness), max 129 x 129
         int w = 0, h = 0;
         std::vector<uint32_t> px;
         if (!decodeImage(active->base / fs::u8path(str(a, 0)), w, h, px) || w < 2 || h < 2)
@@ -1100,7 +1128,7 @@ static void registerSdk() {
 
     // (Mesh.X or "model.obj", position, rotation in degrees, scale, color, texture = "")
     // color tints: 0xFFFFFF keeps a model's own colors/textures. texture (optional) replaces the material's.
-    vm.addNative("render.mesh", [](Instance&, Args& a) {
+    vm.addNative("draw_mesh", [](Instance&, Args& a) {
         const Model* mdl = nullptr;
         int m = -1;
         if (auto path = a.empty() ? nullptr : std::get_if<std::string>(&a[0])) {
@@ -1134,25 +1162,29 @@ static void registerSdk() {
         return Value();
     });
 
-    vm.addNative("input.pressed", [](Instance&, Args& a) { return Value(held[button(a)]); });  // held down
-    vm.addNative("input.just_pressed", [](Instance&, Args& a) { return Value(justPressed(button(a))); });
+    vm.addNative("button_check", [](Instance&, Args& a) { return Value(held[button(a)]); });  // held down
+    vm.addNative("button_check_pressed", [](Instance&, Args& a) { return Value(justPressed(button(a))); });
+    vm.addNative("stick_x", [](Instance&, Args&) { return Value(stickX); });  // analógico esquerdo, -1..1
+    vm.addNative("stick_y", [](Instance&, Args&) { return Value(stickY); });  // 1 = para cima/para frente
+    vm.addNative("look_x", [](Instance&, Args&) { return Value(lookX); });    // analógico direito
+    vm.addNative("look_y", [](Instance&, Args&) { return Value(lookY); });
 
-    // audio.play(Hz, ms) = tone; audio.play("file.wav", volume = 1) = sample. Both return an id for audio.stop(id).
-    vm.addNative("audio.play", [](Instance&, Args& a) {
-        Voice* v;
-        if (!a.empty() && std::holds_alternative<double>(a[0])) {
-            auto t = makeTone(argNum(a, 0), argNum(a, 1));
-            if ((v = playWav(*t, 1, false))) v->tone = t;
-        } else {
-            v = playWav(sound(str(a, 0)), a.size() > 1 ? argNum(a, 1) : 1, false);
-        }
+    // Devolvem um id para audio_stop_sound(id).
+    vm.addNative("audio_play_sound", [](Instance&, Args& a) {  // ("tiro.wav", volume = 1)
+        Voice* v = playWav(sound(str(a, 0)), a.size() > 1 ? argNum(a, 1) : 1, false);
         return Value(double(v ? v->id : 0));
     });
-    vm.addNative("audio.loop", [](Instance&, Args& a) {  // ("music.wav", volume = 1) -> id; plays until stopped
+    vm.addNative("audio_play_tone", [](Instance&, Args& a) {  // (Hz, ms): bipe sintetizado, sem arquivo
+        auto t = makeTone(argNum(a, 0), argNum(a, 1));
+        Voice* v = playWav(*t, 1, false);
+        if (v) v->tone = t;
+        return Value(double(v ? v->id : 0));
+    });
+    vm.addNative("audio_play_loop", [](Instance&, Args& a) {  // ("music.wav", volume = 1) -> id; plays until stopped
         Voice* v = playWav(sound(str(a, 0)), a.size() > 1 ? argNum(a, 1) : 1, true);
         return Value(double(v ? v->id : 0));
     });
-    vm.addNative("audio.stop", [](Instance&, Args& a) {  // (id) stops that sound; () stops everything
+    vm.addNative("audio_stop_sound", [](Instance&, Args& a) {  // (id) stops that sound; () stops everything
         int id = a.empty() ? 0 : (int)argNum(a, 0);
         stopVoices([&](const Voice& v) { return !id || v.id == id; });
         return Value();
@@ -1161,7 +1193,7 @@ static void registerSdk() {
     // use AudioSource: the object's `sound` plays at its `position` and fades out at `range` from the camera
     vm.components["AudioSource"] = {{"position", Value(Vec3{})}, {"sound", Value(std::string())}, {"volume", Value(1.0)},
                                     {"loop", Value(false)}, {"range", Value(20.0)}};
-    vm.addNative("audio.source_play", [](Instance& self, Args&) {
+    vm.addNative("audio_source_play", [](Instance& self, Args&) {
         auto& uses = self.def->uses;
         if (std::find(uses.begin(), uses.end(), "AudioSource") == uses.end())
             throw std::runtime_error("audio.source_play() precisa de `use AudioSource` no objeto");
@@ -1176,15 +1208,15 @@ static void registerSdk() {
         v->range = std::max(0.001, num("range"));
         return Value(double(v->id));
     });
-    vm.addNative("audio.source_stop", [](Instance& self, Args&) {
+    vm.addNative("audio_source_stop", [](Instance& self, Args&) {
         stopVoices([&](const Voice& v) { return v.source.lock().get() == &self; });
         return Value();
     });
 
-    vm.addNative("time.delta", [](Instance&, Args&) { return Value(dt * timeScale); });
-    vm.addNative("time.unscaled_delta", [](Instance&, Args&) { return Value(dt); });  // ignores pause (for UI)
-    vm.addNative("time.scale", [](Instance&, Args&) { return Value(timeScale); });
-    vm.addNative("time.set_scale", [](Instance&, Args& a) {  // 0 = paused, 1 = normal, 0.5 = slow motion
+    vm.addNative("delta_time", [](Instance&, Args&) { return Value(dt * timeScale); });
+    vm.addNative("delta_time_real", [](Instance&, Args&) { return Value(dt); });  // ignores pause (for UI)
+    vm.addNative("time_scale", [](Instance&, Args&) { return Value(timeScale); });
+    vm.addNative("time_set_scale", [](Instance&, Args& a) {  // 0 = paused, 1 = normal, 0.5 = slow motion
         timeScale = std::max(0.0, argNum(a, 0));
         return Value();
     });
@@ -1196,33 +1228,33 @@ static void registerSdk() {
         strftime(buf, sizeof buf, format, &local);
         return Value(std::string(buf));
     };
-    vm.addNative("time.clock", [now](Instance&, Args&) { return now("%H:%M"); });
-    vm.addNative("time.date", [now](Instance&, Args&) { return now("%d/%m"); });
+    vm.addNative("clock_time", [now](Instance&, Args&) { return now("%H:%M"); });
+    vm.addNative("clock_date", [now](Instance&, Args&) { return now("%d/%m"); });
 
     // store: installed games come from games/; saves live in saves/<id>.sav (the online store doesn't exist yet)
-    vm.addNative("store.installed", [](Instance&, Args&) {
+    vm.addNative("game_list", [](Instance&, Args&) {
         auto list = std::make_shared<Array>();
         for (auto& id : installedGames()) list->push_back(Value(id));
         return Value(list);
     });
-    vm.addNative("store.is_installed", [](Instance&, Args& a) { return Value(fs::exists(gameDir(str(a, 0)) / "main.doo")); });
+    vm.addNative("game_installed", [](Instance&, Args& a) { return Value(fs::exists(gameDir(str(a, 0)) / "main.doo")); });
 
     // loja online (só o firmware): o catálogo e os downloads rodam na thread da loja
-    vm.addNative("store.set_url", [](Instance&, Args& a) {
+    vm.addNative("store_set_url", [](Instance&, Args& a) {
         storeUrl = str(a, 0);
         return Value();
     });
-    vm.addNative("store.refresh", [](Instance&, Args&) {
+    vm.addNative("store_refresh", [](Instance&, Args&) {
         storeRun(fetchCatalog);
         return Value();
     });
-    vm.addNative("store.install", [](Instance&, Args& a) {
+    vm.addNative("store_install", [](Instance&, Args& a) {
         std::string id = str(a, 0);
         checkName(id, false);
         storeRun([id] { installGame(id); });
         return Value();
     });
-    vm.addNative("store.uninstall", [](Instance&, Args& a) {
+    vm.addNative("store_uninstall", [](Instance&, Args& a) {
         std::string id = str(a, 0);
         checkName(id, false);
         if (!fs::exists(gameDir(id) / ".loja")) throw std::runtime_error("só a loja desinstala o que ela instalou");
@@ -1230,29 +1262,29 @@ static void registerSdk() {
         fs::remove_all(gameDir(id), ec);
         return Value();
     });
-    vm.addNative("store.can_uninstall", [](Instance&, Args& a) {  // só o que veio da loja, nunca um jogo seu
+    vm.addNative("store_can_uninstall", [](Instance&, Args& a) {  // só o que veio da loja, nunca um jogo seu
         return Value(fs::exists(gameDir(str(a, 0)) / ".loja"));
     });
-    vm.addNative("store.busy", [](Instance&, Args&) { return Value(storeBusy.load()); });
-    vm.addNative("store.progress", [](Instance&, Args&) { return Value(storeProgress.load()); });
-    vm.addNative("store.ready", [](Instance&, Args&) {
+    vm.addNative("store_busy", [](Instance&, Args&) { return Value(storeBusy.load()); });
+    vm.addNative("store_progress", [](Instance&, Args&) { return Value(storeProgress.load()); });
+    vm.addNative("store_ready", [](Instance&, Args&) {
         std::lock_guard<std::mutex> g(storeMutex);
         return Value(catalogReady);
     });
-    vm.addNative("store.error", [](Instance&, Args&) {
+    vm.addNative("store_error", [](Instance&, Args&) {
         std::lock_guard<std::mutex> g(storeMutex);
         return Value(storeError);
     });
-    vm.addNative("store.available", [](Instance&, Args&) {
+    vm.addNative("store_available", [](Instance&, Args&) {
         auto list = std::make_shared<Array>();
         std::lock_guard<std::mutex> g(storeMutex);
         for (auto& it : catalog) list->push_back(Value(it.id));
         return Value(list);
     });
-    vm.addNative("store.online_title", [](Instance&, Args& a) { return Value(catalogItem(str(a, 0)).title); });
-    vm.addNative("store.online_info", [](Instance&, Args& a) { return Value(catalogItem(str(a, 0)).info); });
-    vm.addNative("store.online_size", [](Instance&, Args& a) { return Value((double)catalogItem(str(a, 0)).size); });
-    vm.addNative("store.title", [](Instance&, Args& a) {  // "titulo:" line of games/<id>/info.txt, else the id
+    vm.addNative("store_title", [](Instance&, Args& a) { return Value(catalogItem(str(a, 0)).title); });
+    vm.addNative("store_info", [](Instance&, Args& a) { return Value(catalogItem(str(a, 0)).info); });
+    vm.addNative("store_size", [](Instance&, Args& a) { return Value((double)catalogItem(str(a, 0)).size); });
+    vm.addNative("game_title", [](Instance&, Args& a) {  // "titulo:" line of games/<id>/info.txt, else the id
         std::string id = str(a, 0);
         std::ifstream f(gameDir(id) / "info.txt");
         for (std::string line; std::getline(f, line);) {
@@ -1262,7 +1294,7 @@ static void registerSdk() {
         }
         return Value(id);
     });
-    vm.addNative("store.save", [](Instance&, Args& a) {  // (key, value): the running program's own save data
+    vm.addNative("save_set", [](Instance&, Args& a) {  // (key, value): the running program's own save data
         if (a.size() < 2) throw std::runtime_error("store.save espera (chave, valor)");
         auto kv = readSave(active->id);
         kv[str(a, 0)] = a[1];
@@ -1271,12 +1303,12 @@ static void registerSdk() {
         std::ofstream(savePath(active->id), std::ios::binary) << text;
         return Value();
     });
-    vm.addNative("store.load", [](Instance&, Args& a) {  // (key, default)
+    vm.addNative("save_get", [](Instance&, Args& a) {  // (key, default)
         auto kv = readSave(active->id);
         auto it = kv.find(str(a, 0));
         return it != kv.end() ? it->second : a.size() > 1 ? a[1] : Value();
     });
-    vm.addNative("store.get_save_data", [](Instance&, Args& a) {  // a game's raw save ("" = none)
+    vm.addNative("game_save_data", [](Instance&, Args& a) {  // a game's raw save ("" = none)
         std::string id = str(a, 0);
         if (active != &firmware && id != active->id) throw std::runtime_error("um jogo só pode ler o próprio save");
         std::error_code ec;
@@ -1284,12 +1316,12 @@ static void registerSdk() {
     });
 
     // system: firmware only (enforced by the compiler)
-    vm.addNative("system.launch", [](Instance&, Args& a) { pendingLaunch = str(a, 0); return Value(); });
-    vm.addNative("system.set_volume", [](Instance&, Args& a) {  // 0..1, the whole console
+    vm.addNative("system_launch", [](Instance&, Args& a) { pendingLaunch = str(a, 0); return Value(); });
+    vm.addNative("system_volume", [](Instance&, Args& a) {  // 0..1, the whole console
         if (master) master->SetVolume((float)std::clamp(argNum(a, 0), 0.0, 1.0));
         return Value();
     });
-    vm.addNative("system.delete_save", [](Instance&, Args& a) {
+    vm.addNative("system_delete_save", [](Instance&, Args& a) {
         std::error_code ec;
         fs::remove(savePath(str(a, 0)), ec);
         return Value();
@@ -1321,7 +1353,8 @@ static void frame() {
         // Indexed loops: instances spawned during the frame join in right away.
         auto& scene = active->scene;
         if (scene.empty()) return;
-        for (size_t i = 0; i < scene.size(); i++) if (scene[i]->alive) vm.call(*scene[i], "update");
+        if (timeScale > 0) tickAlarms(vm, scene);  // pausa (escala 0) segura os alarmes também
+        for (size_t i = 0; i < scene.size(); i++) if (scene[i]->alive) vm.call(*scene[i], "step");
         physicsStep(vm, scene, dt * timeScale);
         for (size_t i = 0; i < scene.size(); i++) if (scene[i]->alive) vm.call(*scene[i], "draw");
         for (size_t i = 0; i < scene.size(); i++) if (!scene[i]->alive) vm.call(*scene[i], "destroy");

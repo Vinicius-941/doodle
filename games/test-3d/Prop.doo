@@ -9,9 +9,9 @@ var model = ""
 var rotation = vec3(0, 0, 0)
 
 function tocar() {
-    audio.source_play()
+    audio_source_play()
 }
 
 function draw() {
-    render.mesh(model, position - vec3(0, size.y / 2, 0), rotation, 1, 0xFFFFFF)
+    draw_mesh(model, position - vec3(0, size.y / 2, 0), rotation, 1, 0xFFFFFF)
 }

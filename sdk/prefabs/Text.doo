@@ -9,7 +9,7 @@ var align = "left"
 function paint(focused, t) {
     var tx = x
     if (align == "center") {
-        tx = x + (w - render.text_width(text, size)) / 2
+        tx = x + (w - string_width(text, size)) / 2
     }
-    render.text(tx, y, text, size, color, alpha)
+    draw_text(tx, y, text, size, color, alpha)
 }

@@ -1,6 +1,6 @@
 # Doodle
 
-Console experimental com linguagem própria (**Doo**), compilador, máquina virtual,
+Console experimental com linguagem própria (**Doo**, no formato da GML), compilador, máquina virtual,
 simulador para Windows, firmware e SDK para desenvolvimento de jogos.
 O compilador, a VM e o simulador são implementados em C++; o firmware, os prefabs
 do SDK e os jogos são escritos em Doo.
@@ -60,7 +60,8 @@ No console, a terceira coluna do menu lista o catálogo: **A** instala (ou abre,
 
 Setas controlam o direcional; **Z / X / A / S** correspondem aos botões
 **A / B / X / Y**. **Q / W** são L / R, **Enter** é Start,
-**Backspace** é Select e **Esc** retorna ao firmware (HOME).
+**Backspace** é Select e **Esc** retorna ao firmware (HOME). Os analógicos
+são as setas (esquerdo) e **I / J / K / L** (direito) no teclado.
 Também há suporte a controle XInput.
 
 Consulte os controles específicos do [DooCraft](games/doo-craft/README.md).

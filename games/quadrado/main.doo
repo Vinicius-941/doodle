@@ -9,35 +9,35 @@ var colors = [0xFFCC00, 0x40E0D0, 0xFF5080]
 var ci = 0
 
 function create() {
-    ci = store.load("cor", 0) % len(colors)   // a última cor escolhida fica salva
-    print("quadrado: create")
+    ci = save_get("cor", 0) % array_length(colors)   // a última cor escolhida fica salva
+    show_debug_message("quadrado: create")
 }
 
-function update() {
-    if (input.pressed(Button.Right)) { x += speed * time.delta }
-    if (input.pressed(Button.Left))  { x -= speed * time.delta }
-    if (input.pressed(Button.Down))  { y += speed * time.delta }
-    if (input.pressed(Button.Up))    { y -= speed * time.delta }
+function step() {
+    if (button_check(btn_right)) { x += speed * delta_time }
+    if (button_check(btn_left))  { x -= speed * delta_time }
+    if (button_check(btn_down))  { y += speed * delta_time }
+    if (button_check(btn_up))    { y -= speed * delta_time }
     x = clamp(x, 0, 640 - 40)
     y = clamp(y, 0, 480 - 40)
 
-    if (input.just_pressed(Button.A)) {
-        ci = (ci + 1) % len(colors)
-        store.save("cor", ci)
-        audio.play(440 + ci * 220, 60)
+    if (button_check_pressed(btn_a)) {
+        ci = (ci + 1) % array_length(colors)
+        save_set("cor", ci)
+        audio_play_tone(440 + ci * 220, 60)
     }
-    if (input.just_pressed(Button.B)) {
-        destroy_self()
+    if (button_check_pressed(btn_b)) {
+        instance_destroy()
     }
 
-    render.clear(0x101820)
-    render.rect(x, y, 40, 40, colors[ci])
-    render.text(20, 16, "Quadrado", 26, 0xFFFFFF)
-    render.text(20, 448, "Setas: mover    Z: cor    X: sair    Esc: HOME", 15, 0x8090A0)
+    draw_clear(0x101820)
+    draw_rectangle(x, y, 40, 40, colors[ci])
+    draw_text(20, 16, "Quadrado", 26, 0xFFFFFF)
+    draw_text(20, 448, "Setas: mover    Z: cor    X: sair    Esc: HOME", 15, 0x8090A0)
 }
 
 function destroy() {
-    print("quadrado: destroy")
+    show_debug_message("quadrado: destroy")
 }
 
 function clamp(v, lo, hi) {

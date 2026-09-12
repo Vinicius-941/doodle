@@ -119,59 +119,53 @@ static Value& field(const Value& v, const std::string& name) {  // obj.name on a
 }
 
 VM::VM() {
-    addNative("len", [](Instance&, std::vector<Value>& a) {
-        if (a.size() == 1) {
-            if (auto arr = std::get_if<std::shared_ptr<Array>>(&a[0])) return Value(double((*arr)->size()));
-            if (auto s = std::get_if<std::string>(&a[0])) return Value(double(s->size()));
-        }
-        throw std::runtime_error("len() espera um array ou string");
-    });
-    addNative("print", [](Instance&, std::vector<Value>& a) {
+    addNative("show_debug_message", [](Instance&, std::vector<Value>& a) {
         std::string line;
         for (auto& v : a) line += (line.empty() ? "" : " ") + toString(v);
         printf("%s\n", line.c_str());
         fflush(stdout);
         return Value();
     });
-    addNative("type", [](Instance&, std::vector<Value>& a) {  // object name for instances: type(other) == Player
-        if (a.size() != 1) throw std::runtime_error("type() recebe 1 argumento");
+    addNative("object_name", [](Instance&, std::vector<Value>& a) {  // nome do objeto: object_name(other) == Player
+        if (a.size() != 1) throw std::runtime_error("object_name() recebe 1 argumento");
         auto r = std::get_if<Ref>(&a[0]);
         auto inst = r ? r->p.lock() : nullptr;
         return Value(inst ? inst->def->name : std::string(typeName(a[0])));
     });
-    addNative("is", [](Instance&, std::vector<Value>& a) {  // is(obj, Type): obj is a Type or extends it
-        if (a.size() != 2) throw std::runtime_error("is() recebe 2 argumentos");
+    addNative("object_is", [](Instance&, std::vector<Value>& a) {  // object_is(obj, Tipo): e do tipo ou herda dele
+        if (a.size() != 2) throw std::runtime_error("object_is() recebe 2 argumentos");
         auto r = std::get_if<Ref>(&a[0]);
         auto inst = r ? r->p.lock() : nullptr;
         if (!inst) return Value(false);
         auto& kinds = inst->def->kinds;
         return Value(std::find(kinds.begin(), kinds.end(), toString(a[1])) != kinds.end());
     });
-    addNative("destroy_self", [](Instance& self, std::vector<Value>&) {
+    addNative("instance_destroy", [](Instance& self, std::vector<Value>&) {
         self.alive = false;
         return Value();
     });
     addNative("vec3", [](Instance&, std::vector<Value>& a) {
         return Value(a.empty() ? Vec3{} : Vec3{argNum(a, 0), argNum(a, 1), argNum(a, 2)});
     });
-    // ponytail: minimal math set; the full Doo stdlib is still a pending decision (doc §9)
-    static const std::pair<const char*, double (*)(double)> math[] = {
-        {"math.sin", std::sin}, {"math.cos", std::cos}, {"math.sqrt", std::sqrt}, {"math.abs", std::fabs}, {"math.floor", std::floor}};
-    for (auto& m : math)
-        addNative(m.first, [fn = m.second](Instance&, std::vector<Value>& a) { return Value(fn(argNum(a, 0))); });
-    addNative("math.min", [](Instance&, std::vector<Value>& a) { return Value(std::fmin(argNum(a, 0), argNum(a, 1))); });
-    addNative("math.max", [](Instance&, std::vector<Value>& a) { return Value(std::fmax(argNum(a, 0), argNum(a, 1))); });
-    addNative("math.random", [](Instance&, std::vector<Value>&) {  // 0 <= x < 1
-        static std::mt19937 rng{std::random_device{}()};
-        return Value(std::uniform_real_distribution<double>(0, 1)(rng));
-    });
-    constants["math.pi"] = Value(3.14159265358979323846);
-    addNative("push", [](Instance&, std::vector<Value>& a) {  // push(array, value): appends in place
-        auto arr = a.size() == 2 ? std::get_if<std::shared_ptr<Array>>(&a[0]) : nullptr;
-        if (!arr) throw std::runtime_error("push() espera (array, valor)");
-        (*arr)->push_back(a[1]);
-        return Value();
-    });
+    registerStdlib(*this);
+}
+
+// alarm[0..7] conta quadros e chama alarm0()..alarm7() quando chega ao fim, como na GML.
+void tickAlarms(VM& vm, std::vector<std::shared_ptr<Instance>>& scene) {
+    for (size_t i = 0; i < scene.size(); i++) {
+        if (!scene[i]->alive) continue;
+        Value* v = scene[i]->field("alarm");
+        auto arr = v ? std::get_if<std::shared_ptr<Array>>(v) : nullptr;
+        if (!arr) continue;
+        for (size_t k = 0; k < (*arr)->size() && k < 8; k++) {
+            auto n = std::get_if<double>(&(**arr)[k]);
+            if (!n || *n < 0) continue;  // -1 = desligado
+            if ((*n -= 1) <= 0) {        // alarm[i] = 1 dispara no quadro seguinte, como na GML
+                *n = -1;
+                vm.call(*scene[i], "alarm" + std::to_string(k));
+            }
+        }
+    }
 }
 
 void VM::addNative(const std::string& name, NativeFn fn) {

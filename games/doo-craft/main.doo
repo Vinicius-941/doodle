@@ -34,10 +34,10 @@ var textures = ["", "grass.bmp", "dirt.bmp", "stone.bmp", "sand.bmp", "wood.bmp"
 var colors = [0, 0x74A943, 0x986B45, 0x92989C, 0xDBC586, 0x956335, 0x4A853E, 0xAC6850, 0x454952]
 
 function create() {
-    seed = store.load("seed", 73129)
-    edits = store.load("edits", 0)
-    store.save("seed", seed)
-    menu = spawn(Canvas)
+    seed = save_get("seed", 73129)
+    edits = save_get("edits", 0)
+    save_set("seed", seed)
+    menu = instance_create(Canvas)
     var panel = menu.image("", 110, 75, 420, 330)
     panel.color = 0x101D25
     panel.alpha = 0.96
@@ -52,14 +52,14 @@ function create() {
 }
 
 function hash(x, z) {
-    var v = math.sin(x * 127.1 + z * 311.7 + seed * 0.013) * 43758.5453
-    return v - math.floor(v)
+    var v = sin(x * 127.1 + z * 311.7 + seed * 0.013) * 43758.5453
+    return v - floor(v)
 }
 
 // Smooth interpolated value noise, four octaves. Seeded and deterministic.
 function noise(x, z) {
-    var ix = math.floor(x)
-    var iz = math.floor(z)
+    var ix = floor(x)
+    var iz = floor(z)
     var u = x - ix
     var v = z - iz
     u = u * u * (3 - 2 * u)
@@ -70,7 +70,7 @@ function noise(x, z) {
 }
 
 function terrainHeight(x, z) {
-    return math.floor(4 + noise(x / 23, z / 23) * 13 + noise(x / 10, z / 10) * 7 + noise(x / 5, z / 5) * 3 + noise(x / 2, z / 2))
+    return floor(4 + noise(x / 23, z / 23) * 13 + noise(x / 10, z / 10) * 7 + noise(x / 5, z / 5) * 3 + noise(x / 2, z / 2))
 }
 
 function index(x, y, z) { return (z * width + x) * height + y }
@@ -85,10 +85,10 @@ function set(x, y, z, kind) {
 
 function generateColumn(c) {
     var x = c % width
-    var z = math.floor(c / width)
+    var z = floor(c / width)
     var h = terrainHeight(x, z)
-    push(heights, h)
-    push(surfaces, [])
+    array_push(heights, h)
+    array_push(surfaces, [])
     for (var y = 0; y < height; y += 1) {
         var kind = 0
         if (y == 0) { kind = 8 }
@@ -99,21 +99,21 @@ function generateColumn(c) {
             if (h <= 13) { kind = 4 }
             if (h > 22) { kind = 3 }
         }
-        push(blocks, kind)
+        array_push(blocks, kind)
     }
 }
 
 function tree(c) {
     var x = c % width
-    var z = math.floor(c / width)
+    var z = floor(c / width)
     var h = heights[c]
     if (x < 3 || z < 3 || x > width - 4 || z > width - 4 || h < 11 || h > 21) { return }
-    if (math.abs(x - 24) < 3 && math.abs(z - 24) < 3) { return }
+    if (abs(x - 24) < 3 && abs(z - 24) < 3) { return }
     if (hash(x * 3, z * 3) < 0.982) { return }
     for (var y = h + 3; y <= h + 5; y += 1) {
         for (var dx = -2; dx <= 2; dx += 1) {
             for (var dz = -2; dz <= 2; dz += 1) {
-                if (math.abs(dx) + math.abs(dz) < 4 && get(x + dx, y, z + dz) == 0) { set(x + dx, y, z + dz, 6) }
+                if (abs(dx) + abs(dz) < 4 && get(x + dx, y, z + dz) == 0) { set(x + dx, y, z + dz, 6) }
             }
         }
     }
@@ -126,7 +126,7 @@ function rebuild(x, z) {
     for (var y = 0; y < height; y += 1) {
         var b = get(x, y, z)
         if (b != 0) {
-            if (get(x + 1, y, z) == 0 || get(x - 1, y, z) == 0 || get(x, y + 1, z) == 0 || get(x, y - 1, z) == 0 || get(x, y, z + 1) == 0 || get(x, y, z - 1) == 0) { push(list, y) }
+            if (get(x + 1, y, z) == 0 || get(x - 1, y, z) == 0 || get(x, y + 1, z) == 0 || get(x, y - 1, z) == 0 || get(x, y, z + 1) == 0 || get(x, y, z - 1) == 0) { array_push(list, y) }
         }
     }
     surfaces[z * width + x] = list
@@ -141,24 +141,24 @@ function loadStep() {
         if (cursor == width * width) { cursor = 0 stage = 2 }
     } else if (stage == 2) {
         for (var i = 0; i < 24 && replay < edits; i += 1) {
-            var packed = store.load("edit" + replay, -1)
+            var packed = save_get("edit" + replay, -1)
             if (packed >= 0) {
-                var cell = math.floor(packed / 9)
-                if (cell < len(blocks)) { blocks[cell] = packed % 9 }
+                var cell = floor(packed / 9)
+                if (cell < array_length(blocks)) { blocks[cell] = packed % 9 }
             }
             replay += 1
         }
         if (replay >= edits) { stage = 3 }
     } else if (stage == 3) {
-        for (var i = 0; i < 24 && cursor < width * width; i += 1) { rebuild(cursor % width, math.floor(cursor / width)) cursor += 1 }
+        for (var i = 0; i < 24 && cursor < width * width; i += 1) { rebuild(cursor % width, floor(cursor / width)) cursor += 1 }
         if (cursor == width * width) {
             stage = 4
             respawn()
-            var p = vec3(store.load("px", position.x), store.load("py", position.y), store.load("pz", position.z))
+            var p = vec3(save_get("px", position.x), save_get("py", position.y), save_get("pz", position.z))
             if (!collides(p)) { position = p }
-            yaw = store.load("yaw", 0)
-            pitch = store.load("pitch", -0.25)
-            selected = math.max(1, math.min(7, store.load("selected", 1)))
+            yaw = save_get("yaw", 0)
+            pitch = save_get("pitch", -0.25)
+            selected = max(1, min(7, save_get("selected", 1)))
         }
     }
 }
@@ -183,9 +183,9 @@ function respawn() {
 // Swept movement uses short substeps; collision checks only the player's cells.
 function collides(p) {
     if (p.x < 0.3 || p.z < 0.3 || p.x > width - 0.3 || p.z > width - 0.3 || p.y < 1 || p.y + 1.75 >= height) { return true }
-    for (var x = math.floor(p.x - 0.28); x <= math.floor(p.x + 0.28); x += 1) {
-        for (var z = math.floor(p.z - 0.28); z <= math.floor(p.z + 0.28); z += 1) {
-            for (var y = math.floor(p.y); y <= math.floor(p.y + 1.72); y += 1) {
+    for (var x = floor(p.x - 0.28); x <= floor(p.x + 0.28); x += 1) {
+        for (var z = floor(p.z - 0.28); z <= floor(p.z + 0.28); z += 1) {
+            for (var y = floor(p.y); y <= floor(p.y + 1.72); y += 1) {
                 if (get(x, y, z) != 0) { return true }
             }
         }
@@ -193,15 +193,15 @@ function collides(p) {
     return false
 }
 
-function direction() { return vec3(math.sin(yaw) * math.cos(pitch), math.sin(pitch), math.cos(yaw) * math.cos(pitch)) }
+function direction() { return vec3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch)) }
 
-// Exact voxel DDA: the previous cell is always face-adjacent to the hit.
+// Exact voxel DDA: the previous cell object_is always face-adjacent to the hit.
 function aim() {
     var origin = position + vec3(0, 1.6, 0)
     var d = direction()
-    var x = math.floor(origin.x)
-    var y = math.floor(origin.y)
-    var z = math.floor(origin.z)
+    var x = floor(origin.x)
+    var y = floor(origin.y)
+    var z = floor(origin.z)
     var sx = 1
     var sy = 1
     var sz = 1
@@ -211,9 +211,9 @@ function aim() {
     var dx = 1000000
     var dy = 1000000
     var dz = 1000000
-    if (math.abs(d.x) > 0.000001) { dx = 1 / math.abs(d.x) }
-    if (math.abs(d.y) > 0.000001) { dy = 1 / math.abs(d.y) }
-    if (math.abs(d.z) > 0.000001) { dz = 1 / math.abs(d.z) }
+    if (abs(d.x) > 0.000001) { dx = 1 / abs(d.x) }
+    if (abs(d.y) > 0.000001) { dy = 1 / abs(d.y) }
+    if (abs(d.z) > 0.000001) { dz = 1 / abs(d.z) }
     var tx = (x + 1 - origin.x) * dx
     var ty = (y + 1 - origin.y) * dy
     var tz = (z + 1 - origin.z) * dz
@@ -242,19 +242,19 @@ function edit(x, y, z, kind) {
     rebuild(x + 1, z)
     rebuild(x, z - 1)
     rebuild(x, z + 1)
-    store.save("edit" + edits, index(x, y, z) * 9 + kind)
+    save_set("edit" + edits, index(x, y, z) * 9 + kind)
     edits += 1
-    store.save("edits", edits)
+    save_set("edits", edits)
     return true
 }
 
 function savePlayer() {
-    store.save("px", position.x)
-    store.save("py", position.y)
-    store.save("pz", position.z)
-    store.save("yaw", yaw)
-    store.save("pitch", pitch)
-    store.save("selected", selected)
+    save_set("px", position.x)
+    save_set("py", position.y)
+    save_set("pz", position.z)
+    save_set("yaw", yaw)
+    save_set("pitch", pitch)
+    save_set("selected", selected)
 }
 
 function pause(value) {
@@ -264,38 +264,40 @@ function pause(value) {
     if (value) { savePlayer() menu.focus_on(resumeButton) }
 }
 
-function update() {
+function step() {
     if (stage < 4) { loadStep() return }
-    if (input.just_pressed(Button.Start)) { pause(!paused) }
+    if (button_check_pressed(btn_start)) { pause(!paused) }
     if (paused) {
         if (resumeButton.clicked) { pause(false) }
         if (helpButton.clicked) { help = !help }
-        if (homeButton.clicked) { savePlayer() destroy_self() }
+        if (homeButton.clicked) { savePlayer() instance_destroy() }
     } else {
-        var dt = math.min(time.delta, 0.05)
-        cooldown = math.max(0, cooldown - dt)
+        var dt = min(delta_time, 0.05)
+        cooldown = max(0, cooldown - dt)
         saveTimer += dt
         if (saveTimer > 8) { savePlayer() saveTimer = 0 }
         var forward = 0
         var strafe = 0
-        if (input.pressed(Button.Select)) {
-            if (input.pressed(Button.Up)) { pitch += dt * 1.6 }
-            if (input.pressed(Button.Down)) { pitch -= dt * 1.6 }
-            if (input.pressed(Button.Left)) { strafe = -1 }
-            if (input.pressed(Button.Right)) { strafe = 1 }
+        if (button_check(btn_select)) {
+            if (button_check(btn_up)) { pitch += dt * 1.6 }
+            if (button_check(btn_down)) { pitch -= dt * 1.6 }
+            if (button_check(btn_left)) { strafe = -1 }
+            if (button_check(btn_right)) { strafe = 1 }
         } else {
-            if (input.pressed(Button.Up)) { forward = 1 }
-            if (input.pressed(Button.Down)) { forward = -1 }
-            if (input.pressed(Button.Left)) { yaw -= dt * 1.9 }
-            if (input.pressed(Button.Right)) { yaw += dt * 1.9 }
+            if (button_check(btn_up)) { forward = 1 }
+            if (button_check(btn_down)) { forward = -1 }
+            if (button_check(btn_left)) { yaw -= dt * 1.9 }
+            if (button_check(btn_right)) { yaw += dt * 1.9 }
         }
-        pitch = math.max(-1.5, math.min(1.5, pitch))
-        if (input.just_pressed(Button.A) && grounded) { velocityY = 7.4 grounded = false }
-        var mx = (math.sin(yaw) * forward + math.cos(yaw) * strafe) * 4.3 * dt
-        var mz = (math.cos(yaw) * forward - math.sin(yaw) * strafe) * 4.3 * dt
-        velocityY = math.max(-18, velocityY - 21 * dt)
+        yaw += look_x() * dt * 2.4        // analógico direito (ou IJKL no teclado)
+        pitch += look_y() * dt * 1.8
+        pitch = max(-1.5, min(1.5, pitch))
+        if (button_check_pressed(btn_a) && grounded) { velocityY = 7.4 grounded = false }
+        var mx = (sin(yaw) * forward + cos(yaw) * strafe) * 4.3 * dt
+        var mz = (cos(yaw) * forward - sin(yaw) * strafe) * 4.3 * dt
+        velocityY = max(-18, velocityY - 21 * dt)
         var my = velocityY * dt
-        var steps = math.max(1, math.floor(math.max(math.abs(my), math.max(math.abs(mx), math.abs(mz))) / 0.12) + 1)
+        var steps = max(1, floor(max(abs(my), max(abs(mx), abs(mz))) / 0.12) + 1)
         grounded = false
         for (var i = 0; i < steps; i += 1) {
             var p = position + vec3(mx / steps, 0, 0)
@@ -306,70 +308,70 @@ function update() {
             if (!collides(p)) { position = p }
             else { if (my < 0) { grounded = true } velocityY = 0 }
         }
-        if (input.just_pressed(Button.L)) { selected -= 1 if (selected < 1) { selected = 7 } }
-        if (input.just_pressed(Button.R)) { selected += 1 if (selected > 7) { selected = 1 } }
+        if (button_check_pressed(btn_l)) { selected -= 1 if (selected < 1) { selected = 7 } }
+        if (button_check_pressed(btn_r)) { selected += 1 if (selected > 7) { selected = 1 } }
         aim()
         if (target.x >= 0) {
-            if (input.just_pressed(Button.Y)) { selected = math.min(7, get(target.x, target.y, target.z)) }
-            if (cooldown <= 0 && input.pressed(Button.X)) {
-                if (edit(target.x, target.y, target.z, 0)) { audio.play(170, 35) }
+            if (button_check_pressed(btn_y)) { selected = min(7, get(target.x, target.y, target.z)) }
+            if (cooldown <= 0 && button_check(btn_x)) {
+                if (edit(target.x, target.y, target.z, 0)) { audio_play_tone(170, 35) }
                 cooldown = 0.22
-            } else if (cooldown <= 0 && input.pressed(Button.B)) {
-                if (edit(adjacent.x, adjacent.y, adjacent.z, selected)) { audio.play(310, 35) }
+            } else if (cooldown <= 0 && button_check(btn_b)) {
+                if (edit(adjacent.x, adjacent.y, adjacent.z, selected)) { audio_play_tone(310, 35) }
                 cooldown = 0.22
             }
         }
     }
     var eye = position + vec3(0, 1.6, 0)
-    render.camera(eye, eye + direction(), 74)
-    render.ambient(0xA0A3A6)
-    render.light_directional(vec3(-0.5, -1, 0.3), 0xFFF2D6, 0.8)
+    camera_set(eye, eye + direction(), 74)
+    light_ambient(0xA0A3A6)
+    light_directional(vec3(-0.5, -1, 0.3), 0xFFF2D6, 0.8)
 }
 
 function outline(p) {
     var center = p + vec3(0.5, 0.5, 0.5)
     for (var a = -1; a <= 1; a += 2) {
         for (var b = -1; b <= 1; b += 2) {
-            render.mesh(Mesh.Cube, center + vec3(0, a * 0.503, b * 0.503), vec3(), vec3(1.03, 0.025, 0.025), 0x16212A)
-            render.mesh(Mesh.Cube, center + vec3(a * 0.503, 0, b * 0.503), vec3(), vec3(0.025, 1.03, 0.025), 0x16212A)
-            render.mesh(Mesh.Cube, center + vec3(a * 0.503, b * 0.503, 0), vec3(), vec3(0.025, 0.025, 1.03), 0x16212A)
+            draw_mesh(mesh_cube, center + vec3(0, a * 0.503, b * 0.503), vec3(), vec3(1.03, 0.025, 0.025), 0x16212A)
+            draw_mesh(mesh_cube, center + vec3(a * 0.503, 0, b * 0.503), vec3(), vec3(0.025, 1.03, 0.025), 0x16212A)
+            draw_mesh(mesh_cube, center + vec3(a * 0.503, b * 0.503, 0), vec3(), vec3(0.025, 0.025, 1.03), 0x16212A)
         }
     }
 }
 
 function draw() {
-    render.clear(0x91BCE0)
+    draw_clear(0x91BCE0)
     if (stage < 4) {
-        render.clear(0x142730)
-        render.text(194, 158, "DOOCRAFT", 42, 0xF1E9D2)
+        draw_clear(0x142730)
+        draw_text(194, 158, "DOOCRAFT", 42, 0xF1E9D2)
         var labels = ["Criando montanhas e camadas...", "Plantando arvores...", "Restaurando suas construcoes...", "Preparando o mundo..."]
-        render.text(152, 230, labels[stage], 20, 0xA6C5BC)
-        render.rect(150, 277, 340, 8, 0x324A50)
-        render.rect(150, 277, 340 * (stage + cursor / (width * width)) / 4, 8, 0x89BB63)
-        render.text(246, 315, "Semente " + seed, 16, 0x9CAFAD)
+        draw_text(152, 230, labels[stage], 20, 0xA6C5BC)
+        draw_rectangle(150, 277, 340, 8, 0x324A50)
+        draw_rectangle(150, 277, 340 * (stage + cursor / (width * width)) / 4, 8, 0x89BB63)
+        draw_text(246, 315, "Semente " + seed, 16, 0x9CAFAD)
         return
     }
     var facing = direction()
-    var minX = math.max(0, math.floor(position.x) - 16)
-    var maxX = math.min(width - 1, math.floor(position.x) + 16)
-    var minZ = math.max(0, math.floor(position.z) - 16)
-    var maxZ = math.min(width - 1, math.floor(position.z) + 16)
+    var minX = max(0, floor(position.x) - 16)
+    var maxX = min(width - 1, floor(position.x) + 16)
+    var minZ = max(0, floor(position.z) - 16)
+    var maxZ = min(width - 1, floor(position.z) + 16)
     for (var z = minZ; z <= maxZ; z += 1) {
         for (var x = minX; x <= maxX; x += 1) {
             var dx = x + 0.5 - position.x
             var dz = z + 0.5 - position.z
             if (dx * dx + dz * dz < 256) {
                 var list = surfaces[z * width + x]
-                for (var i = 0; i < len(list); i += 1) {
+                for (var i = 0; i < array_length(list); i += 1) {
                     var y = list[i]
                     var dy = y + 0.5 - position.y - 1.6
                     // Broad 3D cone includes the entire camera frustum, even looking down.
                     if (dx * facing.x + dy * facing.y + dz * facing.z > -1.8) {
                         var kind = get(x, y, z)
                         if (kind == 1) {
-                            render.mesh("grass.obj", vec3(x + 0.5, y + 0.5, z + 0.5), vec3(), 1, 0xFFFFFF)
+                            draw_mesh("grass.obj", vec3(x + 0.5, y + 0.5, z + 0.5), vec3(), 1, 0xFFFFFF)
                         } else {
-                            render.mesh(Mesh.Cube, vec3(x + 0.5, y + 0.5, z + 0.5), vec3(), 1, 0xFFFFFF, textures[kind])
+                            draw_mesh(mesh_cube, vec3(x + 0.5, y + 0.5, z + 0.5), vec3(), 1, 0xFFFFFF, textures[kind])
                         }
                     }
                 }
@@ -377,28 +379,28 @@ function draw() {
         }
     }
     if (target.x >= 0) { outline(target) }
-    render.rect(310, 239, 21, 3, 0x17232A)
-    render.rect(319, 230, 3, 21, 0x17232A)
-    render.rect(311, 240, 19, 1, 0xFFFFFF)
-    render.rect(320, 231, 1, 19, 0xFFFFFF)
-    render.rect(12, 12, 206, 48, 0x142730, 0.8)
-    render.text(23, 17, "DOOCRAFT / CRIATIVO", 17, 0xF2EBD9)
-    render.text(23, 39, math.floor(position.x) + " / " + math.floor(position.y) + " / " + math.floor(position.z) + "   Seed " + seed, 12, 0xB7D3CA)
+    draw_rectangle(310, 239, 21, 3, 0x17232A)
+    draw_rectangle(319, 230, 3, 21, 0x17232A)
+    draw_rectangle(311, 240, 19, 1, 0xFFFFFF)
+    draw_rectangle(320, 231, 1, 19, 0xFFFFFF)
+    draw_rectangle(12, 12, 206, 48, 0x142730, 0.8)
+    draw_text(23, 17, "DOOCRAFT / CRIATIVO", 17, 0xF2EBD9)
+    draw_text(23, 39, floor(position.x) + " / " + floor(position.y) + " / " + floor(position.z) + "   Seed " + seed, 12, 0xB7D3CA)
     if (help && !paused) {
-        render.rect(12, 72, 296, 84, 0x142730, 0.75)
-        render.text(22, 79, "Setas: andar / girar   Z: pular", 15, 0xFFFFFF)
-        render.text(22, 98, "Backspace + setas: olhar / passo lateral", 14, 0xFFFFFF)
-        render.text(22, 117, "A: quebrar   X: colocar   S: copiar bloco", 14, 0xFFFFFF)
-        render.text(22, 136, "Q / W: bloco   Enter: menu   Esc: HOME", 14, 0xFFFFFF)
+        draw_rectangle(12, 72, 296, 84, 0x142730, 0.75)
+        draw_text(22, 79, "Setas: andar / girar   Z: pular", 15, 0xFFFFFF)
+        draw_text(22, 98, "Analógico direito ou IJKL: olhar", 14, 0xFFFFFF)
+        draw_text(22, 117, "A: quebrar   X: colocar   S: copiar bloco", 14, 0xFFFFFF)
+        draw_text(22, 136, "Q / W: bloco   Enter: menu   Esc: HOME", 14, 0xFFFFFF)
     }
-    render.rect(148, 415, 344, 54, 0x142730, 0.9)
+    draw_rectangle(148, 415, 344, 54, 0x142730, 0.9)
     for (var i = 1; i <= 7; i += 1) {
         var x = 154 + (i - 1) * 48
-        if (i == selected) { render.rect(x - 2, 419, 46, 46, 0xE8D6A3) }
-        render.rect(x, 421, 42, 42, 0x33474B)
-        render.image(textures[i], x + 5, 426, 32, 32)
+        if (i == selected) { draw_rectangle(x - 2, 419, 46, 46, 0xE8D6A3) }
+        draw_rectangle(x, 421, 42, 42, 0x33474B)
+        draw_sprite(textures[i], x + 5, 426, 32, 32)
     }
     var label = names[selected] + "  /  ilimitado"
-    render.rect(218, 385, 204, 25, 0x142730, 0.8)
-    render.text(320 - render.text_width(label, 16) / 2, 389, label, 16, 0xFFFFFF)
+    draw_rectangle(218, 385, 204, 25, 0x142730, 0.8)
+    draw_text(320 - string_width(label, 16) / 2, 389, label, 16, 0xFFFFFF)
 }

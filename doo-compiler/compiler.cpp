@@ -386,9 +386,30 @@ struct Codegen {
         }
     }
 
+    // position.x/y/z quando o objeto não declarou x/y/z: devolve o slot de position, senão -1
+    int xyz(const std::string& name) const {
+        if (name != "x" && name != "y" && name != "z") return -1;
+        return field("position");
+    }
+
     void assign(const Node* n) {
         Node* target = n->kids[0].get();
         std::string op = n->text.substr(0, n->text.size() - 1);  // "+=" -> "+", "=" -> ""
+        if (target->kind == K::Name && local(target->text) < 0 && field(target->text) < 0) {
+            if (int p = xyz(target->text); p >= 0) {  // x += 5 mexe em position.x
+                int k = constant(Value(target->text));
+                emit(OP_GET_FIELD, p);
+                if (!op.empty()) {
+                    emit(OP_GET_FIELD, p);
+                    emit(OP_GET_MEMBER, k);
+                }
+                expr(n->kids[1].get());
+                line = n->line;
+                if (!op.empty()) emit(binop(op));
+                emit(OP_SET_MEMBER, k);
+                return emit(OP_SET_FIELD, p);
+            }
+        }
         if (target->kind == K::Member) {  // v.x = e / enemy.hp = e: set the member, then store v back (vec3 is a copy)
             if (target->kids[0]->kind != K::Name) throw err("só dá pra alterar membro de uma variável (ex.: v.x, inimigo.vida)");
             expr(target->kids[0].get());
@@ -421,9 +442,9 @@ struct Codegen {
         auto it = vm.nativeIndex.find(name);
         if (it == vm.nativeIndex.end()) throw err("função desconhecida '" + name + "'");
         // system.* e as funções da loja que mexem no disco/rede são do firmware; um jogo não instala nem apaga jogo
-        static const std::unordered_set<std::string> firmwareOnly = {"store.set_url", "store.refresh", "store.install",
-                                                           "store.uninstall"};
-        if (!privileged && (name.rfind("system.", 0) == 0 || firmwareOnly.count(name)))
+        static const std::unordered_set<std::string> firmwareOnly = {"store_set_url", "store_refresh", "store_install",
+                                                                     "store_uninstall"};
+        if (!privileged && (name.rfind("system_", 0) == 0 || firmwareOnly.count(name)))
             throw err("'" + name + "' é exclusiva do firmware");
         emit(OP_NATIVE, it->second);
         emit(argc);
@@ -482,6 +503,16 @@ struct Codegen {
             s = field(n->text);
             if (s >= 0) { emit(OP_GET_FIELD, s); break; }
             if (objects.count(n->text)) { emit(OP_CONST, constant(Value(n->text))); break; }  // object type = its name
+            if (auto c = vm.constants.find(n->text); c != vm.constants.end()) {  // pi, btn_a, mesh_cube...
+                emit(OP_CONST, constant(c->second));
+                break;
+            }
+            if (vm.nativeIndex.count(n->text)) { native(n->text, 0); break; }  // delta_time e outras sem parênteses
+            if (int p = xyz(n->text); p >= 0) {  // x/y/z soltos são position.x/y/z, como na GML
+                emit(OP_GET_FIELD, p);
+                emit(OP_GET_MEMBER, constant(Value(n->text)));
+                break;
+            }
             throw err("'" + n->text + "' não foi declarada");
         }
         case K::Member: {
@@ -618,6 +649,21 @@ static std::shared_ptr<ObjectDef> generate(const Parsed& x, const ParsedByName& 
                 defaults.push_back(std::move(lit));
             }
         }
+    }
+
+    if (!std::count(obj->fields.begin(), obj->fields.end(), "alarm")) {  // toda instância tem alarm[0..7], -1 = desligado
+        auto arr = std::make_unique<Node>();
+        arr->kind = K::Array;
+        arr->line = 1;
+        for (int i = 0; i < 8; i++) {
+            auto lit = std::make_unique<Node>();
+            lit->kind = K::Lit;
+            lit->line = 1;
+            lit->value = Value(-1.0);
+            arr->kids.push_back(std::move(lit));
+        }
+        inits[0].push_back({slot("alarm"), arr.get()});
+        defaults.push_back(std::move(arr));
     }
 
     // Every function slot first (bodies may call functions declared further down), then the code.

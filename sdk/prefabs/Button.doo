@@ -1,6 +1,6 @@
 object Button extends UIElement
 
-// Botão: fica em destaque com o foco e A aperta. No seu update, leia `clicked` (vale um quadro).
+// Botão: fica em destaque com o foco e A aperta. No seu step, leia `clicked` (vale um quadro).
 
 var text = "Botão"
 var size = 20
@@ -23,12 +23,12 @@ function paint(focused, t) {
     var a = 0.8 * alpha
     if (focused) {
         bg = accent
-        a = (0.8 + 0.2 * math.sin(t * 5)) * alpha
+        a = (0.8 + 0.2 * sin(t * 5)) * alpha
     }
-    render.rect(x, y, w, h, bg, a)
+    draw_rectangle(x, y, w, h, bg, a)
     if (focused) {
-        render.rect(x, y, w, 2, 0xFFFFFF, 0.7 * alpha)
-        render.rect(x, y + h - 2, w, 2, 0xFFFFFF, 0.7 * alpha)
+        draw_rectangle(x, y, w, 2, 0xFFFFFF, 0.7 * alpha)
+        draw_rectangle(x, y + h - 2, w, 2, 0xFFFFFF, 0.7 * alpha)
     }
-    render.text(x + (w - render.text_width(text, size)) / 2, y + (h - size) / 2 - 2, text, size, color, alpha)
+    draw_text(x + (w - string_width(text, size)) / 2, y + (h - size) / 2 - 2, text, size, color, alpha)
 }

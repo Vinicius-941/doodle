@@ -3,9 +3,9 @@ object Canvas
 // Tela de UI do SDK: agrupa elementos, desenha na ordem em que foram criados (sempre por cima do 3D)
 // e cuida do foco pelo controle: o direcional leva o foco ao vizinho naquela direção, A aperta botões,
 // esquerda/direita ajustam sliders.
-//     var menu = spawn(Canvas)
+//     var menu = instance_create(Canvas)
 //     var jogar = menu.button("Jogar", 220, 200, 200, 44)
-//     ...no update:  if (jogar.clicked) { ... }
+//     ...no step:  if (jogar.clicked) { ... }
 // visible = false esconde tudo; active = false desliga o controle (bom para HUD).
 
 var items = []
@@ -20,12 +20,12 @@ var t = 0
 
 function add(e) {    // qualquer UIElement (inclusive os seus, que estendem UIElement)
     e.accent = accent
-    push(items, e)
+    array_push(items, e)
     return e
 }
 
 function text(s, x, y, size) {
-    var e = add(spawn(Text))
+    var e = add(instance_create(Text))
     e.text = s
     e.x = x
     e.y = y
@@ -34,7 +34,7 @@ function text(s, x, y, size) {
 }
 
 function image(path, x, y, w, h) {   // path "" = retângulo da cor do elemento
-    var e = add(spawn(Image))
+    var e = add(instance_create(Image))
     e.path = path
     e.x = x
     e.y = y
@@ -44,7 +44,7 @@ function image(path, x, y, w, h) {   // path "" = retângulo da cor do elemento
 }
 
 function button(label, x, y, w, h) {
-    var e = add(spawn(Button))
+    var e = add(instance_create(Button))
     e.text = label
     e.x = x
     e.y = y
@@ -54,7 +54,7 @@ function button(label, x, y, w, h) {
 }
 
 function slider(label, x, y, w, min, max, value) {
-    var e = add(spawn(Slider))
+    var e = add(instance_create(Slider))
     e.label = label
     e.x = x
     e.y = y
@@ -67,16 +67,16 @@ function slider(label, x, y, w, min, max, value) {
 }
 
 function focus_on(e) {
-    for (var i = 0; i < len(items); i += 1) {
+    for (var i = 0; i < array_length(items); i += 1) {
         if (items[i] == e) { focus = i }
     }
 }
 
 // ---------- controle ----------
 
-function update() {
-    t += time.unscaled_delta   // a UI continua animando com o jogo pausado
-    for (var i = 0; i < len(items); i += 1) {
+function step() {
+    t += delta_time_real   // a UI continua animando com o jogo pausado
+    for (var i = 0; i < array_length(items); i += 1) {
         items[i].reset()
     }
     if (!active || !visible) {
@@ -90,8 +90,8 @@ function update() {
     }
     var e = items[focus]
     var d = 0
-    if (input.just_pressed(Button.Left)) { d = -1 }
-    if (input.just_pressed(Button.Right)) { d = 1 }
+    if (button_check_pressed(btn_left)) { d = -1 }
+    if (button_check_pressed(btn_right)) { d = 1 }
     if (d != 0) {
         if (e.adjust(d)) {
             som(660)
@@ -99,15 +99,15 @@ function update() {
             mover(d, 0)
         }
     }
-    if (input.just_pressed(Button.Up)) { mover(0, -1) }
-    if (input.just_pressed(Button.Down)) { mover(0, 1) }
-    if (input.just_pressed(Button.A) && e.activate()) {
+    if (button_check_pressed(btn_up)) { mover(0, -1) }
+    if (button_check_pressed(btn_down)) { mover(0, 1) }
+    if (button_check_pressed(btn_a) && e.activate()) {
         som(988)
     }
 }
 
 function first() {
-    for (var i = 0; i < len(items); i += 1) {
+    for (var i = 0; i < array_length(items); i += 1) {
         if (items[i].focusable()) { return i }
     }
     return -1
@@ -120,14 +120,14 @@ function mover(dx, dy) {
     var cy = atual.y + atual.h / 2
     var best = -1
     var bestScore = 0
-    for (var i = 0; i < len(items); i += 1) {
+    for (var i = 0; i < array_length(items); i += 1) {
         var e = items[i]
         if (i != focus && e.focusable()) {
             var ex = e.x + e.w / 2 - cx
             var ey = e.y + e.h / 2 - cy
             var along = ex * dx + ey * dy
             if (along > 1) {
-                var score = along + math.abs(ex * dy - ey * dx) * 2
+                var score = along + abs(ex * dy - ey * dx) * 2
                 if (best < 0 || score < bestScore) {
                     best = i
                     bestScore = score
@@ -142,7 +142,7 @@ function mover(dx, dy) {
 }
 
 function som(hz) {
-    if (sounds) { audio.play(hz, 35) }
+    if (sounds) { audio_play_tone(hz, 35) }
 }
 
 // ---------- desenho ----------
@@ -151,14 +151,14 @@ function draw() {
     if (!visible) {
         return
     }
-    for (var i = 0; i < len(items); i += 1) {
+    for (var i = 0; i < array_length(items); i += 1) {
         var e = items[i]
         if (e.visible) { e.paint(i == focus && active, t) }
     }
 }
 
 function destroy() {   // os elementos vão junto
-    for (var i = 0; i < len(items); i += 1) {
+    for (var i = 0; i < array_length(items); i += 1) {
         if (items[i]) { items[i].remove() }
     }
 }

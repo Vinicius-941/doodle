@@ -6,26 +6,26 @@ use SphereCollider
 var trigger = true
 var spin = 0
 
-function update() {
-    spin += 180 * time.delta
+function step() {
+    spin += 180 * delta_time
 }
 
-function on_collision(other) {
-    if (type(other) == Player) {
+function collision(other) {
+    if (object_name(other) == Player) {
         other.coins += 1
-        audio.play("moeda.wav")
-        var brilho = spawn(ParticleSystem, position)   // prefab do SDK
+        audio_play_sound("moeda.wav")
+        var brilho = instance_create(ParticleSystem, position)   // prefab do SDK
         brilho.color = 0xFFD23F
         brilho.size = 0.12
         brilho.burst(16)
-        destroy_self()
+        instance_destroy()
     }
 }
 
 function sumir() {   // trocou de fase: a moeda vai embora sem contar ponto
-    destroy_self()
+    instance_destroy()
 }
 
 function draw() {
-    render.mesh(Mesh.Cylinder, position, vec3(90, spin, 0), vec3(0.8, 0.06, 0.8), 0xFFD23F)
+    draw_mesh(mesh_cylinder, position, vec3(90, spin, 0), vec3(0.8, 0.06, 0.8), 0xFFD23F)
 }

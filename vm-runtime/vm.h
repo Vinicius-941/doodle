@@ -100,4 +100,10 @@ std::string toString(const Value& v);
 
 // Argument checks for natives; throw a readable error on a missing/wrong argument.
 double argNum(const std::vector<Value>& a, size_t i);
+
+// Biblioteca padrao no estilo GML (stdlib.cpp): funcoes soltas de numero, sorteio, geometria, texto e array.
+void registerStdlib(VM& vm);
+
+// Conta os alarm[0..7] de cada instancia viva e dispara alarm0()..alarm7(); chame uma vez por quadro.
+void tickAlarms(VM& vm, std::vector<std::shared_ptr<Instance>>& scene);
 Vec3 argVec(const std::vector<Value>& a, size_t i);

@@ -8,13 +8,13 @@ var chimed = false
 var menu
 
 function create() {
-    audio.play(523, 150)
+    audio_play_tone(523, 150)
 }
 
-function update() {
-    t += time.delta
-    if (!menu && (t > 2.8 || input.just_pressed(Button.A) || input.just_pressed(Button.Start))) {
-        menu = spawn(Xmb)
+function step() {
+    t += delta_time
+    if (!menu && (t > 2.8 || button_check_pressed(btn_a) || button_check_pressed(btn_start))) {
+        menu = instance_create(Xmb)
     }
 }
 
@@ -22,16 +22,16 @@ function draw() {
     if (menu) {
         return
     }
-    render.clear(0x000000)
-    var k = math.min(1, t / 1.2)   // o logo acende em 1.2 s
+    draw_clear(0x000000)
+    var k = min(1, t / 1.2)   // o logo acende em 1.2 s
     if (k == 1 && !chimed) {
-        audio.play(784, 250)
+        audio_play_tone(784, 250)
         chimed = true
     }
-    centered(170, "DOODLE", 80, rgb(255 * k, 255 * k, 255 * k))
-    centered(280, "entertainment system", 18, rgb(120 * k, 140 * k, 200 * k))
+    centered(170, "DOODLE", 80, make_color_rgb(255 * k, 255 * k, 255 * k))
+    centered(280, "entertainment system", 18, make_color_rgb(120 * k, 140 * k, 200 * k))
 }
 
 function centered(y, s, size, color) {
-    render.text((640 - render.text_width(s, size)) / 2, y, s, size, color)
+    draw_text((640 - string_width(s, size)) / 2, y, s, size, color)
 }

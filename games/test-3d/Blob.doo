@@ -16,11 +16,11 @@ var olhando = vec3(0, 0, 1)
 var ang = 0
 var t = 0
 
-function update() {
-    var dt = time.delta
+function step() {
+    var dt = delta_time
     t += dt
     ang += dt * 0.6
-    var destino = casa + vec3(math.sin(ang) * 3, 0, math.cos(ang) * 3)
+    var destino = casa + vec3(sin(ang) * 3, 0, cos(ang) * 3)
     if (alvo && alvo.controllable) {
         var d = alvo.position - position
         if (plano(d) < alcance) { destino = alvo.position }
@@ -36,34 +36,34 @@ function update() {
 }
 
 function plano(v) {   // comprimento no chão (ignora a altura)
-    return math.sqrt(v.x * v.x + v.z * v.z)
+    return sqrt(v.x * v.x + v.z * v.z)
 }
 
-function on_collision(other) {
-    if (type(other) != Player) { return }
+function collision(other) {
+    if (object_name(other) != Player) { return }
     if (other.velocity.y < 0 && other.position.y - 1 > position.y - 0.2) {   // caiu por cima
-        var fx = spawn(ParticleSystem, position)
+        var fx = instance_create(ParticleSystem, position)
         fx.color = cor
         fx.size = 0.16
         fx.burst(18)
         other.quicar()
-        destroy_self()
+        instance_destroy()
     } else {
         other.ferir(position)
     }
 }
 
 function sumir() {
-    destroy_self()
+    instance_destroy()
 }
 
 function draw() {
-    var squash = 1 + math.sin(t * 7) * 0.08
-    render.mesh(Mesh.Sphere, position, vec3(0, 0, 0), vec3(1.25, 1.05 * squash, 1.25), cor)
+    var squash = 1 + sin(t * 7) * 0.08
+    draw_mesh(mesh_sphere, position, vec3(0, 0, 0), vec3(1.25, 1.05 * squash, 1.25), cor)
     var lado = vec3(olhando.z, 0, -olhando.x)
     var olho = position + olhando * 0.5 + vec3(0, 0.2, 0)
-    render.mesh(Mesh.Sphere, olho + lado * 0.2, vec3(0, 0, 0), 0.22, 0xFFFFFF)
-    render.mesh(Mesh.Sphere, olho - lado * 0.2, vec3(0, 0, 0), 0.22, 0xFFFFFF)
-    render.mesh(Mesh.Sphere, olho + lado * 0.2 + olhando * 0.08, vec3(0, 0, 0), 0.11, 0x101418)
-    render.mesh(Mesh.Sphere, olho - lado * 0.2 + olhando * 0.08, vec3(0, 0, 0), 0.11, 0x101418)
+    draw_mesh(mesh_sphere, olho + lado * 0.2, vec3(0, 0, 0), 0.22, 0xFFFFFF)
+    draw_mesh(mesh_sphere, olho - lado * 0.2, vec3(0, 0, 0), 0.22, 0xFFFFFF)
+    draw_mesh(mesh_sphere, olho + lado * 0.2 + olhando * 0.08, vec3(0, 0, 0), 0.11, 0x101418)
+    draw_mesh(mesh_sphere, olho - lado * 0.2 + olhando * 0.08, vec3(0, 0, 0), 0.11, 0x101418)
 }
