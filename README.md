@@ -40,8 +40,21 @@ usado na configuração do CMake.
 | `firmware/` | Boot e menu do console, escritos em Doo |
 | `sdk/` | Física, modelos, áudio, saves e prefabs em Doo |
 | `games/` | Jogos: Quadrado, teste 3D e DooCraft |
+| `store-backend/` | Loja digital: servidor estático e script de publicação |
 | `tests/` | Testes do compilador, runtime e SDK |
 | `docs/` | Manual da linguagem e do SDK |
+
+## Loja
+
+A loja é um servidor de arquivos estáticos — sem framework, sem banco, sem login. Para pôr no ar:
+
+```powershell
+.\store-backend\publicar.ps1
+python -m http.server 8080 --directory store-backend\loja
+```
+
+No console, a terceira coluna do menu lista o catálogo: **A** instala (ou abre, se já estiver instalado) e
+**X** atualiza a lista. Detalhes do formato em [store-backend/README.md](store-backend/README.md).
 
 ## Controles
 

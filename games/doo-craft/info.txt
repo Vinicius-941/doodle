@@ -1,1 +1,2 @@
 titulo: DooCraft - Mundo de Blocos
+descricao: Cave, empilhe e construa num mundo de blocos gerado na hora

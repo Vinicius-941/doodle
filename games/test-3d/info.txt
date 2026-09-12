@@ -1,1 +1,2 @@
 titulo: Vale das Moedas
+descricao: Junte as moedas do vale em tres fases, fugindo das bolotas

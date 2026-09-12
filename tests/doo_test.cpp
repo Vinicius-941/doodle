@@ -134,6 +134,7 @@ int main() {
     VM vm;
     registerPhysics(vm);
     vm.addNative("system.launch", [](Instance&, std::vector<Value>&) { return Value(); });
+    vm.addNative("store.install", [](Instance&, std::vector<Value>&) { return Value(); });
     std::unordered_map<std::string, std::shared_ptr<ObjectDef>> defs;
     std::vector<std::shared_ptr<Instance>> scene;
     auto spawn = [&](const std::string& name, Vec3 pos) {  // same contract as the simulator's spawn()
@@ -166,6 +167,7 @@ int main() {
     CHECK(throws("object X\nfunction f() { g(1) }\nfunction g() {}", vm, "x.doo:2:"));    // wrong arity
     CHECK(throws("object X\nfunction f() { system.launch(\"a\") }", vm, "x.doo:2:"));     // firmware-only API
     CHECK(throws("object X\nuse Foo", vm, "x.doo:2:"));                                   // unknown component
+    CHECK(throws("object X\nfunction f() { store.install(\"a\") }", vm, "x.doo:2:"));      // jogo não instala jogo
     CHECK(compile("object X\nfunction f() { system.launch(\"a\") }", "fw.doo", vm, true)); // ...allowed when privileged
 
     auto birds = compileAll({birdSrc}, vm, false, {animalSrc});  // Animal comes from the library, like an SDK prefab

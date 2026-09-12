@@ -420,7 +420,11 @@ struct Codegen {
     void native(const std::string& name, int argc) {
         auto it = vm.nativeIndex.find(name);
         if (it == vm.nativeIndex.end()) throw err("função desconhecida '" + name + "'");
-        if (!privileged && name.rfind("system.", 0) == 0) throw err("'" + name + "' é exclusiva do firmware");
+        // system.* e as funções da loja que mexem no disco/rede são do firmware; um jogo não instala nem apaga jogo
+        static const std::unordered_set<std::string> firmwareOnly = {"store.set_url", "store.refresh", "store.install",
+                                                           "store.uninstall"};
+        if (!privileged && (name.rfind("system.", 0) == 0 || firmwareOnly.count(name)))
+            throw err("'" + name + "' é exclusiva do firmware");
         emit(OP_NATIVE, it->second);
         emit(argc);
     }

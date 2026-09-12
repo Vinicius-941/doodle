@@ -1,2 +1,4 @@
 build/
 saves/
+store-backend/loja/
+games/*/.loja

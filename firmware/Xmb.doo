@@ -22,16 +22,20 @@ var tema = 0
 var temaNomes = ["Azul", "Verde", "Roxo", "Laranja", "Grafite"]
 var temaCores = [0x2A5BD7, 0x2E9A5A, 0x7A3FC0, 0xD0702A, 0x5A6070]
 
+var loja = []        // ids do catálogo da loja
+var lojaTitulos = []
+var lojaCarregada = false
+var baixando = ""    // id sendo instalado agora ("" = nenhum)
+
 var modo = ""        // "" navegando | "editar" (ajustando uma configuração) | "painel" | "opcoes"
 var painel = []      // linhas do painel de informação aberto
 var opcao = 0        // linha escolhida no menu de opções do jogo
 var opcoesNomes = ["Iniciar", "Apagar dados salvos", "Cancelar"]
 
 function create() {
-    jogos = store.installed()
-    for (var i = 0; i < len(jogos); i += 1) {
-        push(titulos, store.title(jogos[i]))
-    }
+    listarJogos()
+    store.set_url(store.load("loja", "http://localhost:8080"))
+    store.refresh()
     volume = store.load("volume", 80)
     tema = math.max(0, math.min(len(temaNomes) - 1, store.load("tema", 0)))
     system.set_volume(volume / 100)
@@ -42,6 +46,7 @@ function create() {
 function update() {
     var dt = time.delta
     t += dt
+    acompanharLoja()
     fade = math.min(1, fade + dt * 1.6)
     if (fade == 1) {   // sem entrada durante a transição do boot
         if (modo == "editar") {
@@ -60,6 +65,36 @@ function update() {
     var k = math.min(1, dt * 12)
     cx += (cat - cx) * k
     sy += (sel[cat] - sy) * k
+}
+
+function listarJogos() {
+    jogos = store.installed()
+    titulos = []
+    for (var i = 0; i < len(jogos); i += 1) {
+        push(titulos, store.title(jogos[i]))
+    }
+}
+
+// A loja trabalha numa thread do simulador: aqui só se olha o resultado, sem travar o quadro.
+function acompanharLoja() {
+    if (store.ready() && !lojaCarregada) {
+        loja = store.available()
+        lojaTitulos = []
+        for (var i = 0; i < len(loja); i += 1) {
+            push(lojaTitulos, store.online_title(loja[i]))
+        }
+        lojaCarregada = true
+    }
+    if (baixando != "" && !store.busy()) {
+        var erro = store.error()
+        baixando = ""
+        listarJogos()
+        if (erro == "") {
+            audio.play(988, 120)
+        } else {
+            mostrar(["Não deu", erro])
+        }
+    }
 }
 
 function navegar() {
@@ -81,9 +116,18 @@ function navegar() {
     if (input.just_pressed(Button.A)) {
         abrir(cat, sel[cat])
     }
+    if (input.just_pressed(Button.X) && cat == 2 && !store.busy()) {
+        lojaCarregada = false
+        store.refresh()
+        tique()
+    }
     if (input.just_pressed(Button.Y) && cat == 1 && len(jogos) > 0) {
         modo = "opcoes"
         opcao = 0
+        opcoesNomes = ["Iniciar", "Apagar dados salvos", "Cancelar"]
+        if (store.can_uninstall(jogos[sel[1]])) {
+            opcoesNomes = ["Iniciar", "Apagar dados salvos", "Desinstalar", "Cancelar"]
+        }
         audio.play(880, 50)
     }
 }
@@ -99,8 +143,33 @@ function abrir(c, i) {
             iniciar(jogos[i])
         }
     } else {
-        mostrar(["Loja Doodle", "A loja digital ainda não está disponível.", "Destaques, busca e downloads chegam em breve."])
+        abrirLoja(i)
     }
+}
+
+function abrirLoja(i) {
+    if (len(loja) == 0) {
+        mostrar(["Loja Doodle", estadoLoja(), "Servidor: " + store.load("loja", "http://localhost:8080"), "X: tentar de novo"])
+        return
+    }
+    var id = loja[i]
+    if (store.is_installed(id)) {
+        iniciar(id)
+        return
+    }
+    if (store.busy()) {
+        return
+    }
+    baixando = id
+    store.install(id)
+    audio.play(660, 80)
+}
+
+function estadoLoja() {
+    if (store.error() != "") { return store.error() }
+    if (store.busy()) { return "Conectando..." }
+    if (store.ready()) { return "A loja está vazia." }
+    return "Sem resposta da loja."
 }
 
 function editar() {
@@ -125,7 +194,7 @@ function editar() {
 }
 
 function opcoes() {
-    if (input.just_pressed(Button.Down) && opcao < 2) {
+    if (input.just_pressed(Button.Down) && opcao < len(opcoesNomes) - 1) {
         opcao += 1
         tique()
     }
@@ -139,10 +208,17 @@ function opcoes() {
     }
     if (input.just_pressed(Button.A)) {
         var id = jogos[sel[1]]
+        var escolha = opcoesNomes[opcao]
         modo = ""
-        if (opcao == 0) { iniciar(id) }
-        if (opcao == 1) {
+        if (escolha == "Iniciar") { iniciar(id) }
+        if (escolha == "Apagar dados salvos") {
             system.delete_save(id)
+            audio.play(330, 150)
+        }
+        if (escolha == "Desinstalar") {
+            store.uninstall(id)
+            listarJogos()
+            sel[1] = math.max(0, math.min(sel[1], len(jogos) - 1))
             audio.play(330, 150)
         }
     }
@@ -159,6 +235,12 @@ function mostrar(linhas) {
     audio.play(880, 50)
 }
 
+function tamanho(id) {
+    var b = store.online_size(id)
+    if (b >= 1048576) { return math.floor(b / 104857.6) / 10 + " MB" }
+    return math.max(1, math.floor(b / 1024)) + " KB"
+}
+
 function tique() {
     audio.play(660, 30)
 }
@@ -168,13 +250,13 @@ function tique() {
 function contar(c) {
     if (c == 0) { return 3 }
     if (c == 1) { return math.max(1, len(jogos)) }
-    return 2
+    return math.max(1, len(loja))
 }
 
 function rotulo(c, i) {
     if (c == 0) { return ["Volume", "Tema", "Sobre o Doodle"][i] }
     if (c == 1) { return "Nenhum jogo instalado" }
-    return ["Destaques", "Meus downloads"][i]
+    return "Loja Doodle"
 }
 
 function valor(c, i) {
@@ -187,7 +269,7 @@ function dica(c, i) {
     if (c == 0 && i < 2) { return "A: ajustar" }
     if (c == 0) { return "Versão do sistema" }
     if (c == 1) { return "Coloque jogos na pasta games/" }
-    return "Em breve"
+    return estadoLoja()
 }
 
 // ---------- desenho ----------
@@ -234,7 +316,7 @@ function draw() {
         render.rect(0, 0, 640, 480, 0x000000, 0.4)
         render.rect(380, 0, 260, 480, 0x0A1020, 0.9)
         render.text(396, 150, titulos[sel[1]], 20, 0xFFFFFF)
-        for (var i = 0; i < 3; i += 1) {
+        for (var i = 0; i < len(opcoesNomes); i += 1) {
             var oy = 196 + i * 38
             if (i == opcao) { render.rect(384, oy - 6, 252, 34, 0xFFFFFF, 0.15) }
             render.text(400, oy, opcoesNomes[i], 18, 0xFFFFFF)
@@ -243,6 +325,11 @@ function draw() {
 
     var dicas = "A: abrir      Esquerda/Direita: categorias"
     if (cat == 1) { dicas = "A: jogar      Y: opções      Esquerda/Direita: categorias" }
+    if (cat == 2) {
+        dicas = "A: instalar ou jogar      X: atualizar a lista"
+        if (store.busy()) { dicas = "Loja: falando com o servidor..." }
+        if (store.error() != "") { dicas = "Loja: " + store.error() }
+    }
     if (modo == "editar") { dicas = "Esquerda/Direita: ajustar      A: confirmar" }
     if (modo == "opcoes") { dicas = "A: confirmar      B: voltar" }
     if (modo != "painel") { render.text(30, 450, dicas, 14, 0xFFFFFF, 0.75) }
@@ -273,6 +360,22 @@ function item(c, i, y, on) {
             var info = "Sem dados salvos"
             if (store.get_save_data(jogos[i]) != "") { info = "Dados salvos" }
             render.text(col + 100, y + 14, info, 14, 0xE0E8FF, 0.85)
+        }
+        return
+    }
+    if (c == 2 && len(loja) > 0) {
+        var id = loja[i]
+        render.image(icones[2], col - 16, y - 16, 32, 32, a)
+        render.text(col + 30, y - 14, lojaTitulos[i], 22, 0xFFFFFF, a)
+        var estado = tamanho(id)
+        if (store.is_installed(id)) { estado = "Instalado" }
+        if (baixando == id) { estado = math.floor(store.progress() * 100) + "%" }
+        render.text(600 - render.text_width(estado, 18), y - 12, estado, 18, 0xFFFFFF, a)
+        if (baixando == id) {
+            render.rect(col + 30, y + 18, 400, 6, 0x000000, 0.4 * a)
+            render.rect(col + 30, y + 18, 400 * store.progress(), 6, 0x7BD36B, a)
+        } else if (on) {
+            render.text(col + 30, y + 14, store.online_info(id), 14, 0xE0E8FF, 0.85)
         }
         return
     }

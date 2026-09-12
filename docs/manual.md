@@ -396,8 +396,16 @@ quando o objeto é destruído.
 | `store.is_installed(id)` | |
 | `store.title(id)` | Título do `info.txt` (ou o id) |
 | `store.get_save_data(id)` | Save bruto de um jogo (`""` se não houver). Um jogo só lê o próprio |
+| `store.available()` | Ids do catálogo da loja (vazio enquanto não carregou) |
+| `store.online_title(id)` / `store.online_info(id)` / `store.online_size(id)` | Título, descrição e tamanho em bytes de um jogo do catálogo |
+| `store.ready()` | O catálogo já chegou |
+| `store.busy()` | A loja está baixando alguma coisa |
+| `store.progress()` | 0..1 do download em andamento |
+| `store.error()` | Mensagem do último erro da loja (`""` se deu tudo certo) |
+| `store.can_uninstall(id)` | O jogo veio da loja (só esses podem ser desinstalados) |
 
-A loja online ainda não existe: "instalado" significa ter uma pasta em `games/`.
+"Instalado" é ter uma pasta com `main.doo` em `games/`, tenha vindo da loja ou não. Baixar e instalar é
+coisa do firmware (seção 13).
 
 ### 9.7 `physics`
 
@@ -570,8 +578,20 @@ menu estilo XMB, com as categorias Configurações, Jogos e Loja. Só ele pode u
 | `system.launch(id)` | Abre um jogo (o firmware fica suspenso e volta quando o jogo sai) |
 | `system.set_volume(v)` | Volume geral do console, 0..1 |
 | `system.delete_save(id)` | Apaga o save de um jogo |
+| `store.set_url(endereço)` | Endereço da loja |
+| `store.refresh()` | Busca o catálogo (em segundo plano) |
+| `store.install(id)` | Baixa e instala um jogo do catálogo (em segundo plano) |
+| `store.uninstall(id)` | Apaga um jogo que veio da loja |
 
-As configurações do firmware (volume e tema) ficam em `saves/sistema.sav`.
+As configurações do firmware (volume, tema e o endereço da loja, na chave `loja`) ficam em
+`saves/sistema.sav`.
+
+**A loja** é um servidor de arquivos estáticos: `GET /catalogo.txt` lista os jogos e `GET /<id>/<arquivo>`
+baixa cada um. Ver [store-backend/README.md](../store-backend/README.md) para o formato e para publicar.
+Baixar não pode travar o quadro, então roda numa thread do simulador: `store.install(id)` volta na hora e o
+firmware acompanha por `store.busy()` e `store.progress()`. O download vai para `games/<id>.parcial/` e só
+vira `games/<id>/` quando termina inteiro; o que veio da loja ganha um arquivo `.loja` na pasta, e só o que
+tem essa marca pode ser desinstalado — um jogo escrito à mão nunca é apagado pela loja.
 
 ## 14. Erros e depuração
 

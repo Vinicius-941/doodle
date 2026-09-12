@@ -21,10 +21,15 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <atomic>
 #include <map>
+#include <mutex>
+#include <sstream>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include "compiler.h"
+#include "net.h"
 #include "obj.h"
 #include "physics.h"
 #include "save.h"
@@ -614,7 +619,8 @@ static std::vector<std::string> installedGames() {
     std::vector<std::string> ids;
     std::error_code ec;
     for (auto& e : fs::directory_iterator(root / "games", ec))
-        if (fs::exists(e.path() / "main.doo")) ids.push_back(e.path().filename().u8string());
+        if (fs::exists(e.path() / "main.doo") && e.path().extension() != ".parcial")  // pula download pela metade
+            ids.push_back(e.path().filename().u8string());
     return ids;
 }
 
@@ -690,6 +696,122 @@ static void guarded(void (*fn)()) {
         crash = e.what();
         fprintf(stderr, "%s\n", crash.c_str());
     }
+}
+
+// ---------- loja: catálogo e download em segundo plano ----------
+//
+// A loja é um servidor estático: GET <url>/catalogo.txt lista os jogos, GET <url>/<id>/<arquivo> baixa cada
+// arquivo. O catálogo é o mesmo formato dos saves (chave TAB valor), um bloco por jogo:
+//     jogo<TAB>quadrado
+//     titulo<TAB>Quadrado Andante
+//     info<TAB>O primeiro teste do console
+//     arquivo<TAB>main.doo<TAB>412
+// Baixar bloqueia, então roda numa thread; a thread do quadro só olha o progresso.
+
+struct StoreItem {
+    std::string id, title, info;
+    long long size = 0;
+    std::vector<std::pair<std::string, long long>> files;
+};
+
+static std::string storeUrl = "http://localhost:8080";
+static std::vector<StoreItem> catalog;
+static std::string storeError;
+static bool catalogReady = false;
+static std::mutex storeMutex;  // protege catalog/storeError/catalogReady entre a thread do quadro e a da loja
+static std::thread storeThread;
+static std::atomic<bool> storeBusy{false};
+static std::atomic<double> storeProgress{0};
+
+// Nomes que viram caminho em disco ou pedaço de URL: só o que não escapa da pasta do jogo.
+static void checkName(const std::string& s, bool slash) {
+    bool ok = !s.empty() && s.size() <= 120 && s.find("..") == std::string::npos && s[0] != '/';
+    for (char c : s)
+        ok = ok && (isalnum((unsigned char)c) || c == '.' || c == '_' || c == '-' || (slash && c == '/'));
+    if (!ok) throw std::runtime_error("nome recusado pela loja: " + s);
+}
+
+static void storeRun(std::function<void()> job) {
+    if (storeBusy.exchange(true)) return;  // um download por vez
+    if (storeThread.joinable()) storeThread.join();
+    {
+        std::lock_guard<std::mutex> g(storeMutex);
+        storeError.clear();
+    }
+    storeProgress = 0;
+    storeThread = std::thread([job] {
+        try {
+            job();
+        } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> g(storeMutex);
+            storeError = e.what();
+        }
+        storeBusy = false;
+    });
+}
+
+static void fetchCatalog() {
+    std::string txt = net::get(storeUrl + "/catalogo.txt", 1 << 20);
+    std::vector<StoreItem> items;
+    std::istringstream in(txt);
+    for (std::string line; std::getline(in, line);) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        size_t tab = line.find('\t');
+        if (tab == std::string::npos) continue;
+        std::string key = line.substr(0, tab), rest = line.substr(tab + 1);
+        if (key == "jogo") {
+            checkName(rest, false);
+            items.push_back({rest});
+        } else if (items.empty()) {
+            continue;
+        } else if (key == "titulo") {
+            items.back().title = rest;
+        } else if (key == "info") {
+            items.back().info = rest;
+        } else if (key == "arquivo") {
+            size_t t2 = rest.find('\t');
+            std::string name = rest.substr(0, t2);
+            checkName(name, true);
+            long long bytes = t2 == std::string::npos ? 0 : atoll(rest.c_str() + t2 + 1);
+            items.back().files.push_back({name, bytes});
+            items.back().size += bytes;
+        }
+    }
+    std::lock_guard<std::mutex> g(storeMutex);
+    catalog = std::move(items);
+    catalogReady = true;
+}
+
+static StoreItem catalogItem(const std::string& id) {
+    std::lock_guard<std::mutex> g(storeMutex);
+    for (auto& it : catalog)
+        if (it.id == id) return it;
+    throw std::runtime_error("jogo fora do catálogo: " + id);
+}
+
+// Baixa para <id>.parcial e só então troca pela pasta final: um download interrompido não vira jogo quebrado.
+static void installGame(const std::string& id) {
+    StoreItem item = catalogItem(id);
+    fs::path tmp = root / "games" / fs::u8path(id + ".parcial");
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    long long done = 0;
+    for (auto& [name, bytes] : item.files) {
+        std::string data = net::get(storeUrl + "/" + id + "/" + name, 64u << 20);
+        fs::path out = tmp / fs::u8path(name);
+        fs::create_directories(out.parent_path());
+        std::ofstream(out, std::ios::binary).write(data.data(), data.size());
+        done += (long long)data.size();
+        storeProgress = item.size > 0 ? std::min(1.0, double(done) / item.size) : 0.5;
+    }
+    if (!fs::exists(tmp / "main.doo")) {
+        fs::remove_all(tmp, ec);
+        throw std::runtime_error("pacote sem main.doo");
+    }
+    std::ofstream(tmp / ".loja", std::ios::binary) << storeUrl << "\n";  // marca de origem: só isto pode desinstalar
+    fs::remove_all(gameDir(id), ec);
+    fs::rename(tmp, gameDir(id));
+    storeProgress = 1;
 }
 
 // ---------- SDK ----------
@@ -1084,6 +1206,52 @@ static void registerSdk() {
         return Value(list);
     });
     vm.addNative("store.is_installed", [](Instance&, Args& a) { return Value(fs::exists(gameDir(str(a, 0)) / "main.doo")); });
+
+    // loja online (só o firmware): o catálogo e os downloads rodam na thread da loja
+    vm.addNative("store.set_url", [](Instance&, Args& a) {
+        storeUrl = str(a, 0);
+        return Value();
+    });
+    vm.addNative("store.refresh", [](Instance&, Args&) {
+        storeRun(fetchCatalog);
+        return Value();
+    });
+    vm.addNative("store.install", [](Instance&, Args& a) {
+        std::string id = str(a, 0);
+        checkName(id, false);
+        storeRun([id] { installGame(id); });
+        return Value();
+    });
+    vm.addNative("store.uninstall", [](Instance&, Args& a) {
+        std::string id = str(a, 0);
+        checkName(id, false);
+        if (!fs::exists(gameDir(id) / ".loja")) throw std::runtime_error("só a loja desinstala o que ela instalou");
+        std::error_code ec;
+        fs::remove_all(gameDir(id), ec);
+        return Value();
+    });
+    vm.addNative("store.can_uninstall", [](Instance&, Args& a) {  // só o que veio da loja, nunca um jogo seu
+        return Value(fs::exists(gameDir(str(a, 0)) / ".loja"));
+    });
+    vm.addNative("store.busy", [](Instance&, Args&) { return Value(storeBusy.load()); });
+    vm.addNative("store.progress", [](Instance&, Args&) { return Value(storeProgress.load()); });
+    vm.addNative("store.ready", [](Instance&, Args&) {
+        std::lock_guard<std::mutex> g(storeMutex);
+        return Value(catalogReady);
+    });
+    vm.addNative("store.error", [](Instance&, Args&) {
+        std::lock_guard<std::mutex> g(storeMutex);
+        return Value(storeError);
+    });
+    vm.addNative("store.available", [](Instance&, Args&) {
+        auto list = std::make_shared<Array>();
+        std::lock_guard<std::mutex> g(storeMutex);
+        for (auto& it : catalog) list->push_back(Value(it.id));
+        return Value(list);
+    });
+    vm.addNative("store.online_title", [](Instance&, Args& a) { return Value(catalogItem(str(a, 0)).title); });
+    vm.addNative("store.online_info", [](Instance&, Args& a) { return Value(catalogItem(str(a, 0)).info); });
+    vm.addNative("store.online_size", [](Instance&, Args& a) { return Value((double)catalogItem(str(a, 0)).size); });
     vm.addNative("store.title", [](Instance&, Args& a) {  // "titulo:" line of games/<id>/info.txt, else the id
         std::string id = str(a, 0);
         std::ifstream f(gameDir(id) / "info.txt");
@@ -1299,7 +1467,10 @@ int main(int argc, char** argv) {
     for (;;) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) return 0;
+            if (msg.message == WM_QUIT) {
+                if (storeThread.joinable()) storeThread.detach();  // download em curso morre com o processo
+                return 0;
+            }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
