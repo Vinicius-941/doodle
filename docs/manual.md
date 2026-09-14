@@ -490,6 +490,7 @@ arquivo são relativos à pasta do jogo.
 | Função | Descrição |
 |---|---|
 | `camera_set(posição, alvo, fov = 60)` | Câmera em perspectiva (vale para o quadro) |
+| `camera_set_ortho(posição, alvo, largura)` | Câmera sem perspectiva: `largura` unidades do mundo cabem na tela de ponta a ponta (bom para visão isométrica e de cima) |
 | `draw_mesh(malha, posição, rotação, escala, cor, textura = "")` | Desenha uma malha. `malha` é `mesh_cube/Sphere/Cylinder/Capsule/Plane` ou um arquivo `.obj`. `rotação` em graus (vec3, ordem da Unity). `escala` é número ou vec3. `cor` tinge (0xFFFFFF mantém as cores do modelo) |
 | `light_directional(direção, cor, intensidade = 1)` | Luz tipo sol (direção para onde ela aponta) |
 | `light_point(posição, cor, alcance, intensidade = 1)` | Lâmpada: some suavemente até `alcance` |
@@ -645,11 +646,19 @@ chao.heightmap = "relevo.png"    // branco = alto; o topo da imagem fica do lado
 chao.size = vec3(80, 6, 80)      // largura, altura máxima, profundidade
 chao.texture = "grama.png"
 chao.tiling = 16
+chao.texture2 = "pedra.png"      // opcional: segunda textura...
+chao.mask = "relevo.png"         // ...que aparece onde a máscara é clara
 chao.build()                     // depois de ajustar os campos
 var y = chao.height_at(10, -5)   // para pôr objetos no chão
 ```
 
 Sem `heightmap`, é um plano. Usa `TerrainCollider`: quem tem `Rigidbody` anda por cima.
+
+**Duas texturas:** `mask` é uma imagem em tons de cinza esticada sobre o terreno — branco mostra `texture2`,
+preto mostra `texture`, e o meio mistura. Pinte uma trilha de terra numa máscara, ou use o próprio
+heightmap como máscara para a segunda textura aparecer nos morros. `tiling2` repete a segunda textura
+separado (0 = o mesmo `tiling`). A segunda textura custa uma passada a mais, então dobra os triângulos do
+terreno no orçamento.
 
 ### UI: Canvas, Text, Image, Button, Slider
 
@@ -807,7 +816,7 @@ Isto não é escolha, é trabalho a fazer:
 | Área | Limite atual |
 |---|---|
 | Física | Sem massa (dois `Rigidbody` se empurram por igual); cápsula sempre em pé; duas caixas giradas se tocando usam uma aproximação um pouco maior nas quinas |
-| Render | Sem sombras; câmera só em perspectiva; modelos sem animação; terreno com uma textura só |
+| Render | Sem sombras; modelos sem animação; terreno com duas texturas no máximo |
 | Áudio | Só WAV PCM; som posicional com esquerda/direita só em saída estéreo |
 | UI | Só controle (sem mouse/toque); sem campo de texto nem listas com rolagem |
 | Controle | Teclado só para o jogador 1 |

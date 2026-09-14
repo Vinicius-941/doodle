@@ -66,6 +66,8 @@ function cenario() {
     chao.size = vec3(90, 7, 90)
     chao.texture = "grama.png"
     chao.tiling = 22
+    chao.texture2 = "pedra.bmp"   // pedra aparecendo nos morros: o próprio relevo serve de máscara
+    chao.mask = "relevo.png"
     chao.build()
 
     for (var i = 0; i < 3; i += 1) {         // escada de caixas

@@ -7,17 +7,26 @@ object Terrain
 //     chao.size = vec3(80, 6, 80)    // largura, altura máxima, profundidade
 //     chao.texture = "grama.png"
 //     chao.tiling = 16               // quantas vezes a textura se repete de ponta a ponta
-//     chao.build()                   // lê o heightmap: chame depois de ajustar os campos
+//     chao.texture2 = "pedra.png"    // opcional: segunda textura, que aparece onde a máscara é clara
+//     chao.mask = "relevo.png"       // (o próprio heightmap como máscara põe a pedra nos morros)
+//     chao.build()                   // lê o heightmap e a máscara: chame depois de ajustar os campos
 use TerrainCollider
 
 var heightmap = ""
 var texture = ""
 var tiling = 8
+var texture2 = ""
+var mask = ""
+var tiling2 = 0      // 0 = o mesmo tiling da primeira
+var mascara          // a máscara lida por build()
 var color = 0xFFFFFF
 
 function build() {
     if (heightmap != "") {
         heights = heightmap_read(heightmap)
+    }
+    if (mask != "") {
+        mascara = heightmap_read(mask)
     }
 }
 
@@ -26,5 +35,5 @@ function height_at(x, z) {   // altura do chão em (x, z), ou nil fora do terren
 }
 
 function draw() {
-    draw_terrain(position, size, heights, color, texture, tiling)
+    draw_terrain(position, size, heights, color, texture, tiling, texture2, mascara, tiling2 > 0 ? tiling2 : tiling)
 }

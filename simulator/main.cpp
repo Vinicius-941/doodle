@@ -90,7 +90,7 @@ static bool justPressed(int p, int b) { return held[p][b] && !was[p][b]; }
 
 // ---------- render: 2D screen / 3D camera ----------
 
-struct Camera { Vec3 pos{0, 3, 8}, target{0, 0, 0}; double fov = 60; };
+struct Camera { Vec3 pos{0, 3, 8}, target{0, 0, 0}; double fov = 60, largura = 0; };  // largura > 0: ortográfica
 static Camera cam;
 static int mode = -1;  // projection in use: 0 = 2D screen, 1 = 3D camera, -1 = must re-apply
 
@@ -339,7 +339,12 @@ static void mode3D() {
     glEnable(GL_LIGHTING);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(cam.fov, double(W) / H, 0.1, 500);
+    if (cam.largura > 0) {  // ortográfica: sem perspectiva, `largura` unidades do mundo cabem na tela
+        double w = cam.largura / 2, h = w * H / W;
+        glOrtho(-w, w, -h, h, -500, 500);
+    } else {
+        gluPerspective(cam.fov, double(W) / H, 0.1, 500);
+    }
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     gluLookAt(cam.pos.x, cam.pos.y, cam.pos.z, cam.target.x, cam.target.y, cam.target.z, 0, 1, 0);
@@ -1073,26 +1078,41 @@ static const Model& model(const fs::path& p) {
 // address can't be reused by another one while cached.
 struct TerrainKey {
     const Array* rows;
+    const Array* mask;  // com máscara, cada vértice leva a opacidade da segunda textura
     double sx, sy, sz, tiling;
-    bool operator<(const TerrainKey& o) const { return std::tie(rows, sx, sy, sz, tiling) < std::tie(o.rows, o.sx, o.sy, o.sz, o.tiling); }
-};
-static std::map<TerrainKey, std::pair<std::shared_ptr<Array>, GLuint>> terrainMeshes;
-
-static GLuint terrainMesh(const std::shared_ptr<Array>& rows, Vec3 size, double tiling) {
-    TerrainKey key{rows.get(), size.x, size.y, size.z, tiling};
-    if (auto it = terrainMeshes.find(key); it != terrainMeshes.end()) return it->second.second;
-    std::vector<std::vector<double>> h;  // flat plane: still a 33 x 33 grid, so per-vertex (PS1) lighting shows on it
-    if (rows && rows->size() >= 2) {
-        for (auto& r : *rows) {
-            auto cols = std::get_if<std::shared_ptr<Array>>(&r);
-            if (!cols || (*cols)->size() < 2) throw std::runtime_error("heights: cada linha precisa de 2+ números");
-            h.emplace_back();
-            for (auto& v : **cols) h.back().push_back(argNum({v}, 0));
-            if (h.back().size() != h[0].size()) throw std::runtime_error("heights: todas as linhas precisam do mesmo tamanho");
-        }
-    } else {
-        h.assign(33, std::vector<double>(33, 0.0));
+    bool operator<(const TerrainKey& o) const {
+        return std::tie(rows, mask, sx, sy, sz, tiling) < std::tie(o.rows, o.mask, o.sx, o.sy, o.sz, o.tiling);
     }
+};
+struct TerrainMesh { std::shared_ptr<Array> rows, mask; GLuint list; };  // os arrays ficam vivos enquanto no cache
+static std::map<TerrainKey, TerrainMesh> terrainMeshes;
+
+// Linhas de números (heights, máscara) -> grade de doubles; vazia se não houver pelo menos 2 x 2.
+static std::vector<std::vector<double>> grid(const std::shared_ptr<Array>& rows, const char* nome) {
+    std::vector<std::vector<double>> g;
+    if (!rows || rows->size() < 2) return g;
+    for (auto& r : *rows) {
+        auto cols = std::get_if<std::shared_ptr<Array>>(&r);
+        if (!cols || (*cols)->size() < 2) throw std::runtime_error(std::string(nome) + ": cada linha precisa de 2+ números");
+        g.emplace_back();
+        for (auto& v : **cols) g.back().push_back(argNum({v}, 0));
+        if (g.back().size() != g[0].size()) throw std::runtime_error(std::string(nome) + ": todas as linhas precisam do mesmo tamanho");
+    }
+    return g;
+}
+
+static GLuint terrainMesh(const std::shared_ptr<Array>& rows, Vec3 size, double tiling, const std::shared_ptr<Array>& mask = nullptr) {
+    TerrainKey key{rows.get(), mask.get(), size.x, size.y, size.z, tiling};
+    if (auto it = terrainMeshes.find(key); it != terrainMeshes.end()) return it->second.list;
+    auto m = grid(mask, "máscara");
+    auto opacidade = [&](double u, double v) {  // a máscara pode ter outra resolução: amostra com interpolação
+        double fx = u * (m[0].size() - 1), fz = v * (m.size() - 1);
+        size_t j = std::min(size_t(fx), m[0].size() - 2), i = std::min(size_t(fz), m.size() - 2);
+        double tx = fx - j, tz = fz - i;
+        return (m[i][j] * (1 - tx) + m[i][j + 1] * tx) * (1 - tz) + (m[i + 1][j] * (1 - tx) + m[i + 1][j + 1] * tx) * tz;
+    };
+    auto h = grid(rows, "heights");
+    if (h.empty()) h.assign(33, std::vector<double>(33, 0.0));  // flat plane: still a 33 x 33 grid, so per-vertex (PS1) lighting shows on it
     size_t H = h.size(), W = h[0].size();
     auto P = [&](size_t i, size_t j) {  // local position of grid point (row i, column j)
         return Vec3{(double(j) / (W - 1) - 0.5) * size.x, h[i][j] * size.y, (double(i) / (H - 1) - 0.5) * size.z};
@@ -1102,6 +1122,7 @@ static GLuint terrainMesh(const std::shared_ptr<Array>& rows, Vec3 size, double 
         Vec3 n{dz.y * dx.z - dz.z * dx.y, dz.z * dx.x - dz.x * dx.z, dz.x * dx.y - dz.y * dx.x};  // dz x dx: up
         Vec3 p = P(i, j);
         glNormal3d(n.x, n.y, n.z);
+        if (!m.empty()) glColor4d(1, 1, 1, opacidade(double(j) / (W - 1), double(i) / (H - 1)));
         glTexCoord2d(double(j) / (W - 1) * tiling, double(i) / (H - 1) * tiling);
         glVertex3d(p.x, p.y, p.z);
     };
@@ -1117,7 +1138,7 @@ static GLuint terrainMesh(const std::shared_ptr<Array>& rows, Vec3 size, double 
     glEnd();
     glEndList();
     listaTris[list] = (long long)(H - 1) * (W - 1) * 2;
-    terrainMeshes[key] = {rows, list};
+    terrainMeshes[key] = {rows, mask, list};
     return list;
 }
 
@@ -1215,6 +1236,13 @@ static void registerSdk() {
         mode = -1;
         return Value();
     });
+    vm.addNative("camera_set_ortho", [](Instance&, Args& a) {  // (position, target, largura): sem perspectiva
+        double largura = argNum(a, 2);
+        if (largura <= 0) throw std::runtime_error("camera_set_ortho: a largura precisa ser maior que 0");
+        cam = {argVec(a, 0), argVec(a, 1), 60, largura};
+        mode = -1;
+        return Value();
+    });
     // Lights of this frame (declare them in update, every frame): max 8; with none, a default sun lights the scene.
     auto light = [](LightDef l, double intensity) {
         if (lights.size() >= 8) return Value(false);  // ponytail: 8 per frame, like GL's fixed lights; cull by distance if games need more
@@ -1259,15 +1287,26 @@ static void registerSdk() {
     });
 
     // Terrain (see the Terrain prefab): heights = rows of 0..1, or nil for a flat plane
-    vm.addNative("draw_terrain", [](Instance&, Args& a) {  // (position, size, heights, color, texture = "", tiling = 1)
+    // (position, size, heights, color, texture = "", tiling = 1, texture2 = "", mascara = nil, tiling2 = tiling)
+    vm.addNative("draw_terrain", [](Instance&, Args& a) {
         Vec3 p = argVec(a, 0), s = argVec(a, 1);
         auto rows = a.size() > 2 ? std::get_if<std::shared_ptr<Array>>(&a[2]) : nullptr;
-        GLuint list = terrainMesh(rows ? *rows : nullptr, s, opt(a, 5, 1));
+        double tiling = opt(a, 5, 1);
+        GLuint list = terrainMesh(rows ? *rows : nullptr, s, tiling);
         GLuint tex = a.size() > 4 && !str(a, 4).empty() ? texture(active->base / fs::u8path(str(a, 4))) : 0;
         mode3D();
         glPushMatrix();
         glTranslated(p.x, p.y, p.z);
         drawPart(list, tex, rgb01(argNum(a, 3)));
+        auto mask = a.size() > 7 ? std::get_if<std::shared_ptr<Array>>(&a[7]) : nullptr;
+        if (a.size() > 6 && !str(a, 6).empty() && mask && (*mask)->size() >= 2) {
+            // segunda passada: a mesma malha com a segunda textura, opaca onde a máscara é clara
+            GLuint tex2 = texture(active->base / fs::u8path(str(a, 6)));
+            GLuint list2 = terrainMesh(rows ? *rows : nullptr, s, opt(a, 8, tiling), *mask);
+            glDepthFunc(GL_LEQUAL);  // mesmos vértices, mesma profundidade: tem que passar no empate
+            drawPart(list2, tex2, {1, 1, 1});
+            glDepthFunc(GL_LESS);
+        }
         glPopMatrix();
         return Value();
     });
