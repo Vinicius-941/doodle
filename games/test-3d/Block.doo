@@ -7,5 +7,5 @@ var color = 0xB0A898
 var texture = ""   // opcional: imagem aplicada em cada face
 
 function draw() {
-    draw_mesh(mesh_cube, position, vec3(0, 0, 0), size, color, texture)
+    draw_mesh(mesh_cube, position, rotation, size, color, texture)   // o mesmo giro do colisor
 }

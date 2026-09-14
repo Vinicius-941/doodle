@@ -2,23 +2,63 @@
 #include <algorithm>
 #include <cmath>
 
-// Every collider is a "rounded box": an axis-aligned inner box (half extents) grown by a radius.
+// Every collider is a "rounded box": an inner box (half extents) grown by a radius.
 //   Box: half = size/2, r = 0   Sphere: half = 0, r = radius   Capsule (upright): half.y = height/2 - radius, r = radius
-// ponytail: no rotation (boxes stay axis-aligned, capsules upright); add OBB/GJK when rotated colliders are needed
+// A BoxCollider pode girar (`rotation`, em graus, na mesma ordem do draw_mesh). O teste de contato roda no
+// referencial da caixa girada, e o outro corpo entra lá como a caixa alinhada que o contém.
+// ponytail: um corpo que não é a referência vira a caixa que o envolve — exato em face (rampa, parede
+// girada), um pouco gordo em quina e entre duas caixas giradas; GJK/SAT se isso aparecer em jogo.
+
+struct Mat3 {
+    double m[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    Vec3 operator*(const Vec3& v) const {
+        return {m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z, m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z,
+                m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z};
+    }
+    Mat3 operator*(const Mat3& o) const {
+        Mat3 r;
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++) r.m[i][j] = m[i][0] * o.m[0][j] + m[i][1] * o.m[1][j] + m[i][2] * o.m[2][j];
+        return r;
+    }
+    Mat3 transposta() const {
+        Mat3 r;
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++) r.m[i][j] = m[j][i];
+        return r;
+    }
+};
+
+// Graus -> rotação local para mundo, na ordem da Unity (e do draw_mesh): Z, depois X, depois Y.
+static Mat3 rotacao(Vec3 graus) {
+    const double k = 3.14159265358979323846 / 180;
+    double cx = std::cos(graus.x * k), sx = std::sin(graus.x * k), cy = std::cos(graus.y * k), sy = std::sin(graus.y * k),
+           cz = std::cos(graus.z * k), sz = std::sin(graus.z * k);
+    Mat3 x, y, z;
+    x.m[1][1] = cx; x.m[1][2] = -sx; x.m[2][1] = sx; x.m[2][2] = cx;
+    y.m[0][0] = cy; y.m[0][2] = sy; y.m[2][0] = -sy; y.m[2][2] = cy;
+    z.m[0][0] = cz; z.m[0][1] = -sz; z.m[1][0] = sz; z.m[1][1] = cz;
+    return y * x * z;
+}
+
 struct Body {
     std::shared_ptr<Instance> inst;
     Vec3 pos, half, vel;
     double r = 0;
     bool rigid = false, collider = false, solid = false;  // solid = collider that isn't a trigger
     bool grounded = false;
+    bool girado = false;
+    Mat3 rot;  // local -> mundo (identidade sem girar)
 };
 
 void registerPhysics(VM& vm) {
     Value zero(Vec3{}), no(false);
-    vm.components["BoxCollider"] = {{"position", zero}, {"size", Value(Vec3{1, 1, 1})}, {"trigger", no}};
+    vm.components["BoxCollider"] = {{"position", zero}, {"size", Value(Vec3{1, 1, 1})}, {"rotation", zero}, {"trigger", no}};
     vm.components["SphereCollider"] = {{"position", zero}, {"radius", Value(0.5)}, {"trigger", no}};
     vm.components["CapsuleCollider"] = {{"position", zero}, {"radius", Value(0.5)}, {"height", Value(2.0)}, {"trigger", no}};
-    vm.components["Rigidbody"] = {{"position", zero}, {"velocity", zero}, {"gravity", Value(20.0)}, {"grounded", no}};
+    // slope_limit: rampa até esse ângulo é chão (fica parado nela); mais íngreme que isso, escorrega
+    vm.components["Rigidbody"] = {{"position", zero}, {"velocity", zero}, {"gravity", Value(20.0)}, {"grounded", no},
+                                  {"slope_limit", Value(45.0)}};
     // heights: rows of 0..1 (nil = flat) spread over size.x × size.z around position, scaled by size.y
     vm.components["TerrainCollider"] = {{"position", zero}, {"size", Value(Vec3{10, 1, 10})}, {"heights", Value()}};
     vm.addNative("terrain_height", [](Instance& self, std::vector<Value>& a) {  // (x, z) on the caller's terrain
@@ -44,6 +84,11 @@ static double number(const Value& v, const std::string& file) {
 }
 
 bool terrainHeight(Instance& t, double x, double z, double& y) {
+    Vec3 n;
+    return terrainSurface(t, x, z, y, n);
+}
+
+bool terrainSurface(Instance& t, double x, double z, double& y, Vec3& normal) {
     Value* pv = t.field("position");
     Value* sv = t.field("size");
     if (!pv || !sv || !std::holds_alternative<Vec3>(*pv) || !std::holds_alternative<Vec3>(*sv)) return false;
@@ -53,6 +98,7 @@ bool terrainHeight(Instance& t, double x, double z, double& y) {
     auto rows = std::get_if<std::shared_ptr<Array>>(t.field("heights"));
     if (!rows || (*rows)->size() < 2) {  // no heightmap: a flat plane
         y = pos.y;
+        normal = {0, 1, 0};
         return true;
     }
     auto row = [&](size_t i) -> const Array& {
@@ -66,9 +112,16 @@ bool terrainHeight(Instance& t, double x, double z, double& y) {
     double tx = fx - j, tz = fz - i;
     auto h = [&](size_t r, size_t c) { return number(row(r).at(c), t.def->file); };
     // same split as the rendered mesh: triangles (00, 10, 01) and (10, 11, 01)
-    double k = tx + tz <= 1 ? h(i, j) + (h(i, j + 1) - h(i, j)) * tx + (h(i + 1, j) - h(i, j)) * tz
-                            : h(i + 1, j + 1) + (h(i + 1, j) - h(i + 1, j + 1)) * (1 - tx) + (h(i, j + 1) - h(i + 1, j + 1)) * (1 - tz);
+    bool primeiro = tx + tz <= 1;
+    double k = primeiro ? h(i, j) + (h(i, j + 1) - h(i, j)) * tx + (h(i + 1, j) - h(i, j)) * tz
+                        : h(i + 1, j + 1) + (h(i + 1, j) - h(i + 1, j + 1)) * (1 - tx) + (h(i, j + 1) - h(i + 1, j + 1)) * (1 - tz);
     y = pos.y + k * size.y;
+    // inclinação do triângulo (a mesma do desenho) -> normal da superfície
+    double dkx = primeiro ? h(i, j + 1) - h(i, j) : h(i + 1, j + 1) - h(i + 1, j);
+    double dkz = primeiro ? h(i + 1, j) - h(i, j) : h(i + 1, j + 1) - h(i, j + 1);
+    double dydx = dkx * size.y * (cols - 1) / size.x, dydz = dkz * size.y * (rowsN - 1) / size.z;
+    double len = std::sqrt(dydx * dydx + 1 + dydz * dydz);
+    normal = {-dydx / len, 1 / len, -dydz / len};
     return true;
 }
 
@@ -86,6 +139,9 @@ static bool toBody(const std::shared_ptr<Instance>& s, Body& b) {
     b.pos = vec(i, "position");
     if (uses(i, "BoxCollider")) {
         b.half = vec(i, "size") * 0.5;
+        Vec3 g = vec(i, "rotation");
+        b.girado = g.x != 0 || g.y != 0 || g.z != 0;
+        if (b.girado) b.rot = rotacao(g);
     } else if (uses(i, "SphereCollider")) {
         b.r = number(i, "radius");
     } else if (uses(i, "CapsuleCollider")) {
@@ -96,10 +152,32 @@ static bool toBody(const std::shared_ptr<Instance>& s, Body& b) {
     return true;
 }
 
+// Meia-medida alinhada da caixa `half` depois de girada por M: a caixa alinhada que a contém.
+static Vec3 envolve(const Mat3& M, const Vec3& half) {
+    return {std::fabs(M.m[0][0]) * half.x + std::fabs(M.m[0][1]) * half.y + std::fabs(M.m[0][2]) * half.z,
+            std::fabs(M.m[1][0]) * half.x + std::fabs(M.m[1][1]) * half.y + std::fabs(M.m[1][2]) * half.z,
+            std::fabs(M.m[2][0]) * half.x + std::fabs(M.m[2][1]) * half.y + std::fabs(M.m[2][2]) * half.z};
+}
+
+static bool overlapAlinhado(const Vec3& dv, const Vec3& ha, const Vec3& hb, double R, Vec3& push);
+
 // Touching test between two rounded boxes; push = how far to move `a` so they stop overlapping.
 static bool overlap(const Body& a, const Body& b, Vec3& push) {
-    double d[3] = {a.pos.x - b.pos.x, a.pos.y - b.pos.y, a.pos.z - b.pos.z};
-    double ext[3] = {a.half.x + b.half.x, a.half.y + b.half.y, a.half.z + b.half.z};
+    if (!a.girado && !b.girado) return overlapAlinhado(a.pos - b.pos, a.half, b.half, a.r + b.r, push);
+    bool refB = b.girado;  // referencial: a caixa girada (b, se as duas estiverem)
+    const Mat3& ref = refB ? b.rot : a.rot;
+    Mat3 volta = ref.transposta();
+    Vec3 ha = refB ? envolve(volta * a.rot, a.half) : a.half;  // rot de quem não gira é a identidade
+    Vec3 hb = refB ? b.half : envolve(volta * b.rot, b.half);
+    Vec3 local;
+    if (!overlapAlinhado(volta * (a.pos - b.pos), ha, hb, a.r + b.r, local)) return false;
+    push = ref * local;
+    return true;
+}
+
+static bool overlapAlinhado(const Vec3& dv, const Vec3& ha, const Vec3& hb, double R, Vec3& push) {
+    double d[3] = {dv.x, dv.y, dv.z};
+    double ext[3] = {ha.x + hb.x, ha.y + hb.y, ha.z + hb.z};
     double gap[3], out[3], dist2 = 0;
     int k = 0;  // axis of least penetration
     for (int i = 0; i < 3; i++) {
@@ -108,7 +186,6 @@ static bool overlap(const Body& a, const Body& b, Vec3& push) {
         dist2 += out[i] * out[i];
         if (gap[i] > gap[k]) k = i;
     }
-    double R = a.r + b.r;
     if (gap[k] < 0) {  // inner boxes overlap: push out along the shallowest axis
         double p[3] = {};
         p[k] = (d[k] < 0 ? -1 : 1) * (R - gap[k]);
@@ -137,24 +214,31 @@ void physicsStep(VM& vm, const std::vector<std::shared_ptr<Instance>>& scene, do
         b.vel = vec(i, "velocity");
         b.vel.y -= number(i, "gravity") * dt;
         b.pos = b.pos + b.vel * dt;
+        double chao = std::cos(std::clamp(number(i, "slope_limit"), 0.0, 89.0) * 3.14159265358979323846 / 180);
+        // Encostou numa superfície de normal n, afundando `fundo`: se n é chão (rampa até slope_limit), sobe
+        // na vertical e fica parado nela; se é íngreme ou parede, sai pela normal e escorrega.
+        auto apoia = [&](Vec3 n, double fundo) {
+            if (n.y >= chao) {
+                b.pos.y += fundo / n.y;
+                if (b.vel.y < 0) b.vel.y = 0;
+                b.grounded = true;
+            } else {
+                b.pos = b.pos + n * fundo;
+                double vn = b.vel.dot(n);
+                if (vn < 0) b.vel = b.vel - n * vn;  // stop moving into the surface
+            }
+        };
         for (auto& o : bodies) {  // contra o cenário parado
             Vec3 push;
             if (&o == &b || o.rigid || !o.solid || !b.solid || !overlap(b, o, push)) continue;
-            b.pos = b.pos + push;
             double len = std::sqrt(push.dot(push));
-            if (len == 0) continue;
-            Vec3 n = push * (1 / len);
-            double vn = b.vel.dot(n);
-            if (vn < 0) b.vel = b.vel - n * vn;  // stop moving into the surface
-            if (n.y > 0.7) b.grounded = true;    // pushed up = standing on it
+            if (len > 0) apoia(push * (1 / len), len);
         }
-        // ponytail: terrain pushes straight up (any slope is walkable); use the surface normal for slides if needed
         for (auto& t : terrains) {
+            Vec3 n;
             double ground, bottom = b.pos.y - b.half.y - b.r;
-            if (!b.solid || !terrainHeight(*t, b.pos.x, b.pos.z, ground) || bottom >= ground) continue;
-            b.pos.y += ground - bottom;
-            if (b.vel.y < 0) b.vel.y = 0;
-            b.grounded = true;
+            if (!b.solid || !terrainSurface(*t, b.pos.x, b.pos.z, ground, n) || bottom >= ground) continue;
+            apoia(n, (ground - bottom) * n.y);  // o vão vertical, medido na direção da normal
         }
     }
 

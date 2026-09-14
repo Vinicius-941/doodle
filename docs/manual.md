@@ -447,10 +447,10 @@ objeto (ou um ancestral) já declare o campo com `var`. Todos acrescentam `posit
 
 | Componente | Campos (padrão) | Efeito |
 |---|---|---|
-| `BoxCollider` | `size` vec3(1, 1, 1), `trigger` false | Caixa alinhada aos eixos, centrada em `position` |
+| `BoxCollider` | `size` vec3(1, 1, 1), `rotation` vec3(), `trigger` false | Caixa centrada em `position`, girada por `rotation` (graus, mesma ordem do `draw_mesh`) |
 | `SphereCollider` | `radius` 0.5, `trigger` false | Esfera |
 | `CapsuleCollider` | `radius` 0.5, `height` 2, `trigger` false | Cápsula em pé |
-| `Rigidbody` | `velocity` vec3(), `gravity` 20, `grounded` false | A física move o objeto e o empurra para fora do que é sólido |
+| `Rigidbody` | `velocity` vec3(), `gravity` 20, `grounded` false, `slope_limit` 45 | A física move o objeto e o empurra para fora do que é sólido |
 | `TerrainCollider` | `size` vec3(10, 1, 10), `heights` nil | Chão com relevo (veja o prefab `Terrain`) |
 | `AudioSource` | `sound` "", `volume` 1, `loop` false, `range` 20 | Som no mundo (veja `audio_source_play`) |
 
@@ -462,7 +462,11 @@ Física:
 - Dois objetos com `Rigidbody` se empurram: cada um cede metade da sobreposição e a aproximação entre eles
   para. É uma passada por quadro, então uma pilha alta se acomoda em alguns quadros.
 - `collision(other)` é chamado nos dois lados de cada par que se toca e que tem ao menos um `Rigidbody`.
-- Colisores não giram: caixas ficam alinhadas aos eixos e cápsulas ficam em pé.
+- Caixa girada vira rampa ou parede na diagonal: desenhe com o mesmo `rotation` que o colisor usa, e o
+  que se vê é o que colide. Cápsulas continuam sempre em pé.
+- **Rampa ou ladeira:** até `slope_limit` graus (45 por padrão) é chão — o objeto sobe andando, fica parado
+  sem escorregar e `grounded` fica verdadeiro. Mais inclinado que isso, ele escorrega e não conta como
+  apoiado. Vale para caixa girada e para o terreno.
 
 ## 9. API do SDK
 
@@ -799,7 +803,7 @@ Isto não é escolha, é trabalho a fazer:
 
 | Área | Limite atual |
 |---|---|
-| Física | Colisores sem rotação; sem massa (dois `Rigidbody` se empurram por igual); qualquer rampa de terreno é caminhável |
+| Física | Sem massa (dois `Rigidbody` se empurram por igual); cápsula sempre em pé; duas caixas giradas se tocando usam uma aproximação um pouco maior nas quinas |
 | Render | Sem sombras; câmera só em perspectiva; modelos sem animação; terreno com uma textura só |
 | Áudio | Só WAV PCM; som posicional só no volume (sem esquerda/direita) |
 | UI | Só controle (sem mouse/toque); sem campo de texto nem listas com rolagem |

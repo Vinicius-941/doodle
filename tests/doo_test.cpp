@@ -469,6 +469,44 @@ static int run() {
     double dx = std::get<Vec3>(*e2->field("position")).x - std::get<Vec3>(*e1->field("position")).x;
     CHECK(dx > 0.99 && dx < 1.02);  // raio 0.5 + raio 0.5
 
+    // Caixa girada 30 graus em Z é uma rampa: dá pra ficar parado nela (30 < slope_limit 45), sem escorregar
+    auto rampa = spawn("Floor", {300, 0, 0});
+    *rampa->field("size") = Value(Vec3{10, 1, 4});
+    *rampa->field("rotation") = Value(Vec3{0, 0, 30});
+    auto naRampa = spawn("Ball", {300, 5, 0});
+    for (int i = 0; i < 120; i++) physicsStep(vm, scene, 1.0 / 60);
+    Vec3 pr = std::get<Vec3>(*naRampa->field("position"));
+    CHECK(std::fabs(pr.x - 300) < 1e-6 && std::fabs(pr.y - 1 / std::cos(3.14159265358979 / 6)) < 0.01);  // topo + raio
+    CHECK(std::get<bool>(*naRampa->field("grounded")));
+
+    // A 60 graus é íngreme: escorrega ladeira abaixo e não conta como chão
+    auto ladeira = spawn("Floor", {400, 0, 0});
+    *ladeira->field("size") = Value(Vec3{20, 1, 4});
+    *ladeira->field("rotation") = Value(Vec3{0, 0, 60});
+    auto escorrega = spawn("Ball", {400, 5, 0});
+    for (int i = 0; i < 60; i++) physicsStep(vm, scene, 1.0 / 60);  // cai (uns 33 quadros) e escorrega
+    CHECK(std::get<Vec3>(*escorrega->field("position")).x < 399.5 && !std::get<bool>(*escorrega->field("grounded")));
+
+    // Parede girada 45 graus em Y: bater nela de frente desvia para o lado, em vez de parar reto
+    auto parede = spawn("Floor", {600, 0.5, 0});
+    *parede->field("size") = Value(Vec3{1, 3, 10});
+    *parede->field("rotation") = Value(Vec3{0, 45, 0});
+    auto batedor = spawn("Ball", {597, 0.5, 0});
+    *batedor->field("gravity") = Value(0.0);
+    *batedor->field("velocity") = Value(Vec3{4, 0, 0});
+    for (int i = 0; i < 60; i++) physicsStep(vm, scene, 1.0 / 60);
+    CHECK(std::fabs(std::get<Vec3>(*batedor->field("position")).z) > 0.3);
+
+    // Terreno íngreme (63 graus): também escorrega, enquanto a rampa suave abaixo segura parado
+    auto morro = spawn("Hill", {500, 0, 0});
+    auto subida = std::make_shared<Array>();
+    for (int r = 0; r < 2; r++) subida->push_back(Value(std::make_shared<Array>(Array{Value(0.0), Value(1.0)})));
+    *morro->field("heights") = Value(subida);
+    *morro->field("size") = Value(Vec3{10, 20, 10});
+    auto noMorro = spawn("Ball", {502, 25, 0});
+    for (int i = 0; i < 120; i++) physicsStep(vm, scene, 1.0 / 60);  // cai (uns 61 quadros) e escorrega
+    CHECK(std::get<Vec3>(*noMorro->field("position")).x < 501);
+
     // Terrain: a 2x2 heightmap ramp (0 -> 4 along x) far from the rest; the ball rests on the triangle's surface
     auto hill = spawn("Hill", {100, 0, 0});
     auto ramp = std::make_shared<Array>();
