@@ -7,9 +7,10 @@
 // ponytail: no rotation (boxes stay axis-aligned, capsules upright); add OBB/GJK when rotated colliders are needed
 struct Body {
     std::shared_ptr<Instance> inst;
-    Vec3 pos, half;
+    Vec3 pos, half, vel;
     double r = 0;
     bool rigid = false, collider = false, solid = false;  // solid = collider that isn't a trigger
+    bool grounded = false;
 };
 
 void registerPhysics(VM& vm) {
@@ -129,36 +130,61 @@ void physicsStep(VM& vm, const std::vector<std::shared_ptr<Instance>>& scene, do
         if (s->alive && uses(*s, "TerrainCollider")) terrains.push_back(s);
     }
 
-    // ponytail: O(n²) pairs, and Rigidbody-vs-Rigidbody only reports contacts (no push); add a broadphase/impulses when needed
+    // ponytail: O(n²) pairs; ganha uma broadphase quando o número de corpos justificar
     for (auto& b : bodies) {
         if (!b.rigid) continue;
         Instance& i = *b.inst;
-        Vec3 v = vec(i, "velocity");
-        v.y -= number(i, "gravity") * dt;
-        b.pos = b.pos + v * dt;
-        bool grounded = false;
-        for (auto& o : bodies) {
+        b.vel = vec(i, "velocity");
+        b.vel.y -= number(i, "gravity") * dt;
+        b.pos = b.pos + b.vel * dt;
+        for (auto& o : bodies) {  // contra o cenário parado
             Vec3 push;
             if (&o == &b || o.rigid || !o.solid || !b.solid || !overlap(b, o, push)) continue;
             b.pos = b.pos + push;
             double len = std::sqrt(push.dot(push));
             if (len == 0) continue;
             Vec3 n = push * (1 / len);
-            double vn = v.dot(n);
-            if (vn < 0) v = v - n * vn;       // stop moving into the surface
-            if (n.y > 0.7) grounded = true;  // pushed up = standing on it
+            double vn = b.vel.dot(n);
+            if (vn < 0) b.vel = b.vel - n * vn;  // stop moving into the surface
+            if (n.y > 0.7) b.grounded = true;    // pushed up = standing on it
         }
         // ponytail: terrain pushes straight up (any slope is walkable); use the surface normal for slides if needed
         for (auto& t : terrains) {
             double ground, bottom = b.pos.y - b.half.y - b.r;
             if (!b.solid || !terrainHeight(*t, b.pos.x, b.pos.z, ground) || bottom >= ground) continue;
             b.pos.y += ground - bottom;
-            if (v.y < 0) v.y = 0;
-            grounded = true;
+            if (b.vel.y < 0) b.vel.y = 0;
+            b.grounded = true;
         }
-        *i.field("position") = Value(b.pos);
-        *i.field("velocity") = Value(v);
-        *i.field("grounded") = Value(grounded);
+    }
+
+    // Dois Rigidbody se empurram: massas iguais, cada um cede metade e a aproximação entre eles zera.
+    // Uma passada só por quadro, então pilha alta acomoda em alguns quadros em vez de na hora.
+    for (size_t a = 0; a < bodies.size(); a++) {
+        for (size_t c = a + 1; c < bodies.size(); c++) {
+            Body &x = bodies[a], &y = bodies[c];
+            Vec3 push;
+            if (!x.rigid || !y.rigid || !x.solid || !y.solid || !overlap(x, y, push)) continue;
+            x.pos = x.pos + push * 0.5;
+            y.pos = y.pos - push * 0.5;
+            double len = std::sqrt(push.dot(push));
+            if (len == 0) continue;
+            Vec3 n = push * (1 / len);
+            double rel = (x.vel - y.vel).dot(n);
+            if (rel < 0) {  // estão se aproximando: cancela essa parte da velocidade nos dois
+                x.vel = x.vel - n * (rel / 2);
+                y.vel = y.vel + n * (rel / 2);
+            }
+            if (n.y > 0.7) x.grounded = true;   // x ficou por cima de y
+            if (n.y < -0.7) y.grounded = true;
+        }
+    }
+
+    for (auto& b : bodies) {
+        if (!b.rigid) continue;
+        *b.inst->field("position") = Value(b.pos);
+        *b.inst->field("velocity") = Value(b.vel);
+        *b.inst->field("grounded") = Value(b.grounded);
     }
 
     // on_collision(other) every frame while touching (like GameMaker's collision event)

@@ -408,6 +408,8 @@ Física:
 - Só objetos com `Rigidbody` se movem; eles são empurrados para fora de colisores sólidos e do terreno.
   `grounded` fica verdadeiro quando estão apoiados em algo.
 - `trigger = true`: não bloqueia, só gera `collision` (moedas, zonas).
+- Dois objetos com `Rigidbody` se empurram: cada um cede metade da sobreposição e a aproximação entre eles
+  para. É uma passada por quadro, então uma pilha alta se acomoda em alguns quadros.
 - `collision(other)` é chamado nos dois lados de cada par que se toca e que tem ao menos um `Rigidbody`.
 - Colisores não giram: caixas ficam alinhadas aos eixos e cápsulas ficam em pé.
 
@@ -453,12 +455,17 @@ arquivo são relativos à pasta do jogo.
 
 | Função | Descrição |
 |---|---|
-| `button_check(btn_x)` | Verdadeiro enquanto o botão está apertado |
-| `button_check_pressed(btn_x)` | Verdadeiro só no quadro em que foi apertado |
-| `stick_x()` / `stick_y()` | Analógico esquerdo, -1..1 (y positivo = para cima/para frente) |
-| `look_x()` / `look_y()` | Analógico direito, -1..1 |
+| `button_check(btn_x, jogador = 1)` | Verdadeiro enquanto o botão está apertado |
+| `button_check_pressed(btn_x, jogador = 1)` | Verdadeiro só no quadro em que foi apertado |
+| `stick_x(jogador = 1)` / `stick_y(jogador = 1)` | Analógico esquerdo, -1..1 (y positivo = para cima/para frente) |
+| `look_x(jogador = 1)` / `look_y(jogador = 1)` | Analógico direito, -1..1 |
+| `pad_connected(jogador = 1)` | Há um controle plugado para esse jogador |
 
-Botões: `btn_up/Down/Left/Right/A/B/X/Y/L/R/Start/Select/Home`.
+Botões: `btn_up`, `btn_down`, `btn_left`, `btn_right`, `btn_a`, `btn_b`, `btn_x`, `btn_y`, `btn_l`, `btn_r`,
+`btn_start`, `btn_select`, `btn_home`.
+
+**Dois jogadores**: o controle 1 é o jogador 1 e o controle 2 é o jogador 2. O teclado vale sempre como
+jogador 1, junto com o controle 1 — quem não passa o número de jogador está lendo o jogador 1.
 
 Os analógicos já vêm com zona morta tratada: dentro dela valem 0, e fora dela o valor recomeça do 0 em vez
 de pular. Sem controle plugado, as **setas** fazem o analógico esquerdo e **I/J/K/L** o direito, então um
@@ -727,6 +734,8 @@ hardware da Fase 3 (aperte **F3** para ver, ou rode com `--fps`).
 | Desenhos | 600 por quadro | Idem |
 | Textura | 8 MB carregados | Idem |
 | Luzes | 8 por quadro | A nona é recusada (`light_point` devolve `false`) |
+| Vozes de áudio | 24 ao mesmo tempo, como o PS1 | A mais antiga (fora as de loop e posicionais) cede o lugar |
+| Jogadores | 2 controles | O teclado conta como jogador 1 |
 | Recursão | 200 chamadas | Erro de execução |
 
 O terreno vira uma grade de no máximo 65 × 65 (8 mil triângulos) e as malhas prontas são de baixa
@@ -740,9 +749,9 @@ Isto não é escolha, é trabalho a fazer:
 |---|---|
 | Linguagem | Sem `break`/`continue`, `self`, `++`, operador ternário, dicionários, `with` |
 | Números | Um tipo só, ponto flutuante, como o `real` da GML (sem inteiro separado) |
-| Física | Colisores sem rotação; dois `Rigidbody` só avisam o contato (não se empurram); qualquer rampa de terreno é caminhável |
+| Física | Colisores sem rotação; sem massa (dois `Rigidbody` se empurram por igual); qualquer rampa de terreno é caminhável |
 | Render | Sem sombras; câmera só em perspectiva; modelos sem animação; terreno com uma textura só |
-| Áudio | Só WAV PCM; som posicional só no volume (sem esquerda/direita); sem limite de vozes |
+| Áudio | Só WAV PCM; som posicional só no volume (sem esquerda/direita) |
 | UI | Só controle (sem mouse/toque); sem campo de texto nem listas com rolagem |
-| Controle | Só o controle 1 (sem 2 jogadores); sem vibração e sem gatilhos analógicos |
+| Controle | Sem vibração e sem gatilhos analógicos; teclado só para o jogador 1 |
 | Loja | Servidor de arquivos estáticos, sem conta nem pagamento |

@@ -63,8 +63,9 @@ static VM vm;
 static Program firmware, game;
 static Program* active = &firmware;
 static std::string crash, pendingLaunch;
-static bool keyDown[256], held[NBUTTONS], was[NBUTTONS];
-static double stickX, stickY, lookX, lookY;  // analógicos, -1..1 (y positivo = para cima/para frente)
+static const int JOGADORES = 2;
+static bool keyDown[256], held[JOGADORES][NBUTTONS], was[JOGADORES][NBUTTONS];
+static double stickX[JOGADORES], stickY[JOGADORES], lookX[JOGADORES], lookY[JOGADORES];  // -1..1 (y+ = cima/frente)
 static bool showFps = false, fpsLog = false;  // F3 (ou --fps): contador de quadros
 
 // Orçamento do console: o simulador roda num PC que aguenta muito mais que o alvo da Fase 3, então ele
@@ -83,7 +84,7 @@ static double fpsValue = 0, fpsWorst = 0;
 static double dt = 0;         // real seconds since the last frame
 static double timeScale = 1;  // games pause with time.set_scale(0); UI keeps going on time.unscaled_delta
 
-static bool justPressed(int b) { return held[b] && !was[b]; }
+static bool justPressed(int p, int b) { return held[p][b] && !was[p][b]; }
 
 // ---------- render: 2D screen / 3D camera ----------
 
@@ -605,6 +606,7 @@ struct Voice {
     std::shared_ptr<Wav> tone;      // samples of a generated tone
     std::weak_ptr<Instance> source; // AudioSource: follows this instance
     double volume = 1, range = 0;   // range > 0 = positional (fades out with distance to the camera)
+    bool loop = false;              // música: nunca é a voz sacrificada quando o console está cheio
 };
 static IXAudio2* xaudio;  // null when there is no audio device: games run muted
 static IXAudio2MasteringVoice* master;  // its volume = system volume (firmware settings)
@@ -618,8 +620,16 @@ static void initAudio() {
     }
 }
 
+static const size_t MAX_VOZES = 24;  // o console mistura 24 sons ao mesmo tempo, como o PS1
+
 static Voice* playWav(const Wav& w, double volume, bool loop) {  // nullptr when muted
     if (!xaudio) return nullptr;
+    if (voices.size() >= MAX_VOZES) {  // cheio: a voz mais antiga que não está em loop cede o lugar
+        auto velha = std::find_if(voices.begin(), voices.end(), [](const Voice& v) { return !v.loop && v.range == 0 && !v.source.lock(); });
+        if (velha == voices.end()) velha = voices.begin();
+        velha->v->DestroyVoice();
+        voices.erase(velha);
+    }
     IXAudio2SourceVoice* v = nullptr;
     if (FAILED(xaudio->CreateSourceVoice(&v, reinterpret_cast<const WAVEFORMATEX*>(w.format.data()))))
         throw std::runtime_error("formato de WAV não suportado (use PCM de 8 ou 16 bits)");
@@ -633,6 +643,7 @@ static Voice* playWav(const Wav& w, double volume, bool loop) {  // nullptr when
     v->Start();
     voices.push_back({nextVoiceId++, v});
     voices.back().volume = volume;
+    voices.back().loop = loop;
     return &voices.back();
 }
 
@@ -698,30 +709,32 @@ static void keys(int left, int right, int down, int up, double& x, double& y) {
 
 static void pollInput() {
     // ponytail: an empty XInput slot is slow to query, so a missing pad is re-checked every ~2s
-    static bool padConnected = true;
-    static int padRetry = 0;
-    XINPUT_STATE xs = {};
-    bool pad = false;
-    if (padConnected || --padRetry <= 0) {
-        pad = padConnected = XInputGetState(0, &xs) == ERROR_SUCCESS;
-        padRetry = 120;
+    static bool padConnected[JOGADORES] = {true, true};
+    static int padRetry[JOGADORES] = {};
+    for (int p = 0; p < JOGADORES; p++) {
+        XINPUT_STATE xs = {};
+        bool pad = false;
+        if (padConnected[p] || --padRetry[p] <= 0) {
+            pad = padConnected[p] = XInputGetState(p, &xs) == ERROR_SUCCESS;
+            padRetry[p] = 120;
+        }
+        const XINPUT_GAMEPAD& g = xs.Gamepad;
+        for (int i = 0; i < NBUTTONS; i++) {
+            was[p][i] = held[p][i];
+            held[p][i] = (p == 0 && keyDown[keyMap[i]]) || (pad && (g.wButtons & padMap[i]));  // teclado = jogador 1
+        }
+        if (pad) {  // left stick doubles as the d-pad
+            const int dz = 16000;
+            held[p][BTN_UP] |= g.sThumbLY > dz;
+            held[p][BTN_DOWN] |= g.sThumbLY < -dz;
+            held[p][BTN_LEFT] |= g.sThumbLX < -dz;
+            held[p][BTN_RIGHT] |= g.sThumbLX > dz;
+        }
+        axes(pad ? g.sThumbLX : 0, pad ? g.sThumbLY : 0, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE, stickX[p], stickY[p]);
+        axes(pad ? g.sThumbRX : 0, pad ? g.sThumbRY : 0, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE, lookX[p], lookY[p]);
     }
-    const XINPUT_GAMEPAD& g = xs.Gamepad;
-    for (int i = 0; i < NBUTTONS; i++) {
-        was[i] = held[i];
-        held[i] = keyDown[keyMap[i]] || (pad && (g.wButtons & padMap[i]));
-    }
-    if (pad) {  // left stick doubles as the d-pad
-        const int dz = 16000;
-        held[BTN_UP] |= g.sThumbLY > dz;
-        held[BTN_DOWN] |= g.sThumbLY < -dz;
-        held[BTN_LEFT] |= g.sThumbLX < -dz;
-        held[BTN_RIGHT] |= g.sThumbLX > dz;
-    }
-    axes(pad ? g.sThumbLX : 0, pad ? g.sThumbLY : 0, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE, stickX, stickY);
-    axes(pad ? g.sThumbRX : 0, pad ? g.sThumbRY : 0, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE, lookX, lookY);
-    keys(VK_LEFT, VK_RIGHT, VK_DOWN, VK_UP, stickX, stickY);  // sem controle, as setas fazem o analógico esquerdo
-    keys('J', 'L', 'K', 'I', lookX, lookY);                   // ...e IJKL, o direito
+    keys(VK_LEFT, VK_RIGHT, VK_DOWN, VK_UP, stickX[0], stickY[0]);  // sem controle, as setas fazem o analógico esquerdo
+    keys('J', 'L', 'K', 'I', lookX[0], lookY[0]);                   // ...e IJKL, o direito
 }
 
 // ---------- programs: firmware and games ----------
@@ -938,6 +951,12 @@ static void installGame(const std::string& id) {
 static std::string str(Args& a, size_t i) {
     if (i >= a.size()) throw std::runtime_error("faltou o argumento " + std::to_string(i + 1));
     return toString(a[i]);
+}
+
+static int player(Args& a, size_t i) {  // argumento opcional: 1 ou 2 (padrão 1)
+    int p = i < a.size() ? (int)argNum(a, i) : 1;
+    if (p < 1 || p > JOGADORES) throw std::runtime_error("jogador inválido (use 1 ou 2)");
+    return p - 1;
 }
 
 static int button(Args& a) {
@@ -1261,12 +1280,17 @@ static void registerSdk() {
         return Value();
     });
 
-    vm.addNative("button_check", [](Instance&, Args& a) { return Value(held[button(a)]); });  // held down
-    vm.addNative("button_check_pressed", [](Instance&, Args& a) { return Value(justPressed(button(a))); });
-    vm.addNative("stick_x", [](Instance&, Args&) { return Value(stickX); });  // analógico esquerdo, -1..1
-    vm.addNative("stick_y", [](Instance&, Args&) { return Value(stickY); });  // 1 = para cima/para frente
-    vm.addNative("look_x", [](Instance&, Args&) { return Value(lookX); });    // analógico direito
-    vm.addNative("look_y", [](Instance&, Args&) { return Value(lookY); });
+    // O jogador é sempre o último argumento e vale 1 por padrão; o teclado é sempre o jogador 1.
+    vm.addNative("button_check", [](Instance&, Args& a) { return Value(held[player(a, 1)][button(a)]); });
+    vm.addNative("button_check_pressed", [](Instance&, Args& a) { return Value(justPressed(player(a, 1), button(a))); });
+    vm.addNative("stick_x", [](Instance&, Args& a) { return Value(stickX[player(a, 0)]); });  // analógico esquerdo, -1..1
+    vm.addNative("stick_y", [](Instance&, Args& a) { return Value(stickY[player(a, 0)]); });  // 1 = para cima/para frente
+    vm.addNative("look_x", [](Instance&, Args& a) { return Value(lookX[player(a, 0)]); });    // analógico direito
+    vm.addNative("look_y", [](Instance&, Args& a) { return Value(lookY[player(a, 0)]); });
+    vm.addNative("pad_connected", [](Instance&, Args& a) {
+        XINPUT_STATE xs = {};
+        return Value(XInputGetState(player(a, 0), &xs) == ERROR_SUCCESS);
+    });
 
     // Devolvem um id para audio_stop_sound(id).
     vm.addNative("audio_play_sound", [](Instance&, Args& a) {  // ("tiro.wav", volume = 1)
@@ -1481,17 +1505,17 @@ static void present(const RECT& rc) {
 static void frame() {
     if (!crash.empty()) {
         rect(0, 0, W, H, 0x301010);
-        text(30, 30, "Erro", 32, 0xFF6060);
+        text(10, 8, "Erro", 16, 0xFF6060);
         std::wstring msg = widen(crash);
-        for (size_t i = 0; i * 60 < msg.size(); i++) textW(30, 90 + i * 22.0, msg.substr(i * 60, 60), 16, 0xFFFFFF);
-        text(30, H - 50, "HOME (Esc) para voltar", 18, 0xAAAAAA);
-        if (justPressed(BTN_HOME)) {
+        for (size_t i = 0; i * 48 < msg.size() && i < 11; i++) textW(10, 30 + i * 11.0, msg.substr(i * 48, 48), 9, 0xFFFFFF);
+        text(10, H - 16, "HOME (Esc) para voltar", 9, 0xAAAAAA);
+        if (justPressed(0, BTN_HOME)) {
             crash.clear();
             if (active == &game) backToFirmware(); else guarded(bootFirmware);  // a crashed firmware reboots from disk
         }
         return;
     }
-    if (active == &game && justPressed(BTN_HOME)) {  // HOME always belongs to the system
+    if (active == &game && justPressed(0, BTN_HOME)) {  // HOME always belongs to the system
         guarded([] { unload(game); });
         backToFirmware();
         return;

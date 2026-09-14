@@ -321,6 +321,13 @@ static int run() {
     for (int i = 0; i < 60; i++) physicsStep(vm, scene, 1.0 / 60);
     CHECK(std::fabs(std::get<Vec3>(*roller->field("position")).x - 3.5) < 0.01);
 
+    // Dois Rigidbody se empurram: nascem sobrepostos e se afastam até só encostar
+    auto e1 = spawn("Ball", {200, 0.5, 0});
+    auto e2 = spawn("Ball", {200.6, 0.5, 0});
+    for (int i = 0; i < 40; i++) physicsStep(vm, scene, 1.0 / 60);
+    double dx = std::get<Vec3>(*e2->field("position")).x - std::get<Vec3>(*e1->field("position")).x;
+    CHECK(dx > 0.99 && dx < 1.02);  // raio 0.5 + raio 0.5
+
     // Terrain: a 2x2 heightmap ramp (0 -> 4 along x) far from the rest; the ball rests on the triangle's surface
     auto hill = spawn("Hill", {100, 0, 0});
     auto ramp = std::make_shared<Array>();
