@@ -66,6 +66,8 @@ static std::string crash, pendingLaunch;
 static const int JOGADORES = 2;
 static bool keyDown[256], held[JOGADORES][NBUTTONS], was[JOGADORES][NBUTTONS];
 static double stickX[JOGADORES], stickY[JOGADORES], lookX[JOGADORES], lookY[JOGADORES];  // -1..1 (y+ = cima/frente)
+static double gatilhoL[JOGADORES], gatilhoR[JOGADORES];  // gatilhos analógicos, 0..1
+static double vibraAte[JOGADORES];                       // quando a vibração de cada controle desliga (0 = parado)
 static bool showFps = false, fpsLog = false;  // F3 (ou --fps): contador de quadros
 
 // Orçamento do console: o simulador roda num PC que aguenta muito mais que o alvo da Fase 3, então ele
@@ -669,6 +671,22 @@ static void stopVoices(Match match) {
 
 // Once per frame: drop finished voices; positional ones follow their instance and fade with distance.
 // ponytail: volume only, no stereo panning; use X3DAudio when direction matters
+// Lado da fonte em relação à câmera -> ganho em cada caixa, com potência constante (no meio, os dois lados
+// tocam como antes). ponytail: só saída estéreo; 5.1 fica no mapa padrão do XAudio2.
+static void pan(Voice& vc, Vec3 d) {
+    XAUDIO2_VOICE_DETAILS fonte = {}, saida = {};
+    master->GetVoiceDetails(&saida);
+    vc.v->GetVoiceDetails(&fonte);
+    if (saida.InputChannels != 2 || fonte.InputChannels > 2) return;
+    Vec3 frente = cam.target - cam.pos, direita{-frente.z, 0, frente.x};
+    double lado = 0, dl = std::sqrt(d.x * d.x + d.z * d.z), rl = std::sqrt(direita.dot(direita));
+    if (dl > 1e-6 && rl > 1e-6) lado = std::clamp((d.x * direita.x + d.z * direita.z) / (dl * rl), -1.0, 1.0);
+    const double quarto = 3.14159265358979323846 / 4;
+    float l = float(std::cos((lado + 1) * quarto) * std::sqrt(2.0)), r = float(std::sin((lado + 1) * quarto) * std::sqrt(2.0));
+    float mono[2] = {l, r}, estereo[4] = {l, 0, 0, r};  // linha = caixa de saída, coluna = canal da fonte
+    vc.v->SetOutputMatrix(nullptr, fonte.InputChannels, 2, fonte.InputChannels == 1 ? mono : estereo);
+}
+
 static void updateAudio() {
     stopVoices([](Voice& vc) {
         XAUDIO2_VOICE_STATE st;
@@ -682,6 +700,7 @@ static void updateAudio() {
         Value* vol = inst->field("volume");  // read live, so the game can change it while playing
         if (vol && std::holds_alternative<double>(*vol)) vc.volume = std::get<double>(*vol);
         vc.v->SetVolume(float(vc.volume * std::max(0.0, 1 - std::sqrt(d.dot(d)) / vc.range)));
+        pan(vc, d);
         return false;
     });
 }
@@ -730,11 +749,26 @@ static void pollInput() {
             held[p][BTN_LEFT] |= g.sThumbLX < -dz;
             held[p][BTN_RIGHT] |= g.sThumbLX > dz;
         }
+        auto gatilho = [](BYTE v) {  // abaixo do limiar do XInput vale 0, e depois recomeça do 0
+            const double t = XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
+            return v > t ? (v - t) / (255 - t) : 0.0;
+        };
+        gatilhoL[p] = pad ? gatilho(g.bLeftTrigger) : 0;
+        gatilhoR[p] = pad ? gatilho(g.bRightTrigger) : 0;
         axes(pad ? g.sThumbLX : 0, pad ? g.sThumbLY : 0, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE, stickX[p], stickY[p]);
         axes(pad ? g.sThumbRX : 0, pad ? g.sThumbRY : 0, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE, lookX[p], lookY[p]);
     }
     keys(VK_LEFT, VK_RIGHT, VK_DOWN, VK_UP, stickX[0], stickY[0]);  // sem controle, as setas fazem o analógico esquerdo
     keys('J', 'L', 'K', 'I', lookX[0], lookY[0]);                   // ...e IJKL, o direito
+    if (keyDown['E']) gatilhoL[0] = 1;                              // E e R, os gatilhos
+    if (keyDown['R']) gatilhoR[0] = 1;
+    for (int p = 0; p < JOGADORES; p++) {                           // vibração com hora para acabar
+        if (vibraAte[p] > 0 && elapsed >= vibraAte[p]) {
+            XINPUT_VIBRATION zero = {};
+            XInputSetState(p, &zero);
+            vibraAte[p] = 0;
+        }
+    }
 }
 
 // ---------- programs: firmware and games ----------
@@ -815,7 +849,16 @@ static void bootFirmware() {
     load(firmware, "sistema", "firmware", root, true);
 }
 
-static void backToFirmware() {  // a game's sounds (music loops included) and pause end with it
+static void pararVibracao() {
+    for (int p = 0; p < JOGADORES; p++) {
+        XINPUT_VIBRATION zero = {};
+        XInputSetState(p, &zero);
+        vibraAte[p] = 0;
+    }
+}
+
+static void backToFirmware() {  // a game's sounds (music loops included), vibration and pause end with it
+    pararVibracao();
     stopAllSounds();
     timeScale = 1;
     game = Program{};
@@ -1289,6 +1332,20 @@ static void registerSdk() {
     vm.addNative("stick_y", [](Instance&, Args& a) { return Value(stickY[player(a, 0)]); });  // 1 = para cima/para frente
     vm.addNative("look_x", [](Instance&, Args& a) { return Value(lookX[player(a, 0)]); });    // analógico direito
     vm.addNative("look_y", [](Instance&, Args& a) { return Value(lookY[player(a, 0)]); });
+    vm.addNative("trigger_l", [](Instance&, Args& a) { return Value(gatilhoL[player(a, 0)]); });  // 0..1
+    vm.addNative("trigger_r", [](Instance&, Args& a) { return Value(gatilhoR[player(a, 0)]); });
+    vm.addNative("pad_vibrate", [](Instance&, Args& a) {  // (motor esquerdo 0..1, motor direito 0..1, segundos, jogador = 1)
+        int p = player(a, 3);
+        double segundos = argNum(a, 2);
+        XINPUT_VIBRATION v = {};
+        if (segundos > 0) {
+            v.wLeftMotorSpeed = WORD(std::clamp(argNum(a, 0), 0.0, 1.0) * 65535);
+            v.wRightMotorSpeed = WORD(std::clamp(argNum(a, 1), 0.0, 1.0) * 65535);
+        }
+        XInputSetState(p, &v);
+        vibraAte[p] = segundos > 0 ? elapsed + segundos : 0;
+        return Value();
+    });
     vm.addNative("pad_connected", [](Instance&, Args& a) {
         XINPUT_STATE xs = {};
         return Value(XInputGetState(player(a, 0), &xs) == ERROR_SUCCESS);
@@ -1675,6 +1732,7 @@ int main(int argc, char** argv) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) {
+                pararVibracao();  // controle não fica tremendo depois que o console fecha
                 if (storeThread.joinable()) storeThread.detach();  // download em curso morre com o processo
                 return 0;
             }

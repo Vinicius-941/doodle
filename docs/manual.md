@@ -70,6 +70,7 @@ pelo menu, sem recompilar o simulador.
 | L / R | Q / W | LB / RB |
 | Analógico esquerdo | Setas | Analógico esquerdo |
 | Analógico direito | I / J / K / L | Analógico direito |
+| Gatilhos | E / R | LT / RT |
 | Start / Select | Enter / Backspace | Start / — |
 | HOME | Esc | Back |
 
@@ -514,6 +515,8 @@ arquivo são relativos à pasta do jogo.
 | `button_check_pressed(btn_x, jogador = 1)` | Verdadeiro só no quadro em que foi apertado |
 | `stick_x(jogador = 1)` / `stick_y(jogador = 1)` | Analógico esquerdo, -1..1 (y positivo = para cima/para frente) |
 | `look_x(jogador = 1)` / `look_y(jogador = 1)` | Analógico direito, -1..1 |
+| `trigger_l(jogador = 1)` / `trigger_r(jogador = 1)` | Gatilhos analógicos (LT / RT), 0..1 |
+| `pad_vibrate(esquerda, direita, segundos, jogador = 1)` | Liga os dois motores (0..1) por um tempo; `segundos` 0 desliga |
 | `pad_connected(jogador = 1)` | Há um controle plugado para esse jogador |
 
 Botões: `btn_up`, `btn_down`, `btn_left`, `btn_right`, `btn_a`, `btn_b`, `btn_x`, `btn_y`, `btn_l`, `btn_r`,
@@ -534,7 +537,7 @@ jogo pode ler só os analógicos e funcionar nos dois. O esquerdo também contin
 | `audio_play_sound("arquivo.wav", volume = 1)` | Toca um WAV (PCM 8/16 bits). Devolve um id |
 | `audio_play_loop("arquivo.wav", volume = 1)` | Toca em loop até `audio_stop_sound(id)` |
 | `audio_stop_sound(id)` / `audio_stop_all()` | Para um som / todos |
-| `audio_source_play()` | Com `use AudioSource`: toca `sound` na posição do objeto; o volume cai com a distância até a câmera (zero em `range`) e acompanha `volume` ao vivo. Devolve um id |
+| `audio_source_play()` | Com `use AudioSource`: toca `sound` na posição do objeto; o volume cai com a distância até a câmera (zero em `range`), o som sai do lado em que o objeto está na tela, e acompanha `volume` ao vivo. Devolve um id |
 | `audio_source_stop()` | Para os sons deste objeto |
 
 Os sons se misturam (vários ao mesmo tempo). Todos param quando o jogo fecha; um som posicional também para
@@ -805,7 +808,7 @@ Isto não é escolha, é trabalho a fazer:
 |---|---|
 | Física | Sem massa (dois `Rigidbody` se empurram por igual); cápsula sempre em pé; duas caixas giradas se tocando usam uma aproximação um pouco maior nas quinas |
 | Render | Sem sombras; câmera só em perspectiva; modelos sem animação; terreno com uma textura só |
-| Áudio | Só WAV PCM; som posicional só no volume (sem esquerda/direita) |
+| Áudio | Só WAV PCM; som posicional com esquerda/direita só em saída estéreo |
 | UI | Só controle (sem mouse/toque); sem campo de texto nem listas com rolagem |
-| Controle | Sem vibração e sem gatilhos analógicos; teclado só para o jogador 1 |
+| Controle | Teclado só para o jogador 1 |
 | Loja | Servidor de arquivos estáticos, sem conta nem pagamento |
