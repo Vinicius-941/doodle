@@ -790,6 +790,7 @@ static void load(Program& prog, const std::string& id, const std::string& dir, c
     prog.id = id;
     prog.base = base;
     active = &prog;
+    vm.scene = &prog.scene;  // with e instance_* olham a cena de quem está rodando
     cam = {};  // each program starts with the default camera, and unpaused
     timeScale = 1;
     mode = -1;
@@ -819,6 +820,7 @@ static void backToFirmware() {  // a game's sounds (music loops included) and pa
     timeScale = 1;
     game = Program{};
     active = &firmware;
+    vm.scene = &firmware.scene;
 }
 
 static void guarded(void (*fn)()) {

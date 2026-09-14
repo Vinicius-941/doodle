@@ -232,6 +232,10 @@ Tudo é função solta, com os nomes da GML — quem vem do GameMaker já sabe e
 |---|---|
 | `instance_create(Objeto, posição)` ou `instance_create(Objeto, x, y, z)` | Cria e devolve a referência |
 | `instance_destroy()` | Marca este objeto para destruição no fim do quadro |
+| `instance_exists(Tipo)` / `instance_exists(ref)` | Há alguma instância viva desse tipo / essa ainda existe |
+| `instance_number(Tipo)` | Quantas vivas (descendentes contam) |
+| `instance_find(Tipo, n)` | A n-ésima (a partir de 0), ou `nil` |
+| `instance_nearest(x, y, z, Tipo)` | A mais perto do ponto, ou `nil` |
 | `object_name(x)` | `"Player"` para objetos; senão `"número"`, `"string"`, `"array"`, `"vec3"`, `"bool"`, `"nil"` |
 | `object_is(obj, Tipo)` | Verdadeiro se `obj` é `Tipo` ou estende `Tipo` |
 | `show_debug_message(a, b, ...)` | Escreve no console do simulador |
@@ -332,7 +336,7 @@ if (object_is(other, BasicCharacterController)) { ... }  // o tipo ou algum desc
 - Alterar membro (`a.b = ...`) só funciona quando `a` é uma variável; `lista[i].vida = 0` não compila
   (use `var e = lista[i]` e depois `e.vida = 0`).
 - Usar um objeto já destruído é erro de execução.
-- Não existe `self`: um objeto não passa a si mesmo como argumento.
+- `self` é a referência para o próprio objeto: `alvo.persegue(self)`.
 
 ### 6.3 `x`, `y`, `z`
 
@@ -343,6 +347,8 @@ x += 3 * delta_time      // o mesmo que position.x += 3 * delta_time
 y = 0
 if (z > 10) { z = -10 }
 ```
+
+Vale também em referência para outro objeto: `inimigo.x`, `other.z += 1`.
 
 `position` continua existindo para contas com vetor inteiro (`position + forward() * 2`). Se o objeto
 declarar seu próprio `var x`, ele vence — é o caso dos prefabs de UI, onde `x` é a posição na tela.
@@ -365,6 +371,31 @@ function alarm0() {
 
 `-1` é o valor de desligado, e é assim que eles começam. Alarme só conta com o jogo andando: quem pausa
 com `time_set_scale(0)` também segura os alarmes.
+
+### 6.5 `with`, `self` e `other`
+
+`with` roda um bloco **como** outro objeto — igual à GML. Dentro dele, os campos e as funções são do
+alvo; os `var` da função de fora continuam visíveis; e `other` é quem abriu o `with`:
+
+```doo
+function explodir() {
+    var dano = 30
+    with (Inimigo) {                  // todos os Inimigo vivos (e os que estendem Inimigo)
+        if (point_distance(x, z, other.x, other.z) < 5) {
+            hp -= dano                // hp do inimigo; dano é o local de explodir()
+            other.acertos += 1        // campo de quem chamou
+        }
+    }
+}
+
+function limpar() {
+    with (Moeda) { instance_destroy() }   // instance_destroy() dentro do with destrói o alvo
+}
+```
+
+O alvo pode ser um tipo, uma referência (`with (alvo) { ... }`) ou um array de referências. A lista é
+tirada na entrada do `with`: quem nascer dentro do bloco não entra na volta, e quem for destruído antes da
+sua vez é pulado. `super` não funciona lá dentro.
 
 ## 7. Herança
 
@@ -747,7 +778,7 @@ Isto não é escolha, é trabalho a fazer:
 
 | Área | Limite atual |
 |---|---|
-| Linguagem | Sem `break`/`continue`, `self`, `++`, operador ternário, dicionários, `with` |
+| Linguagem | Sem `break`/`continue`, `++`, operador ternário, dicionários |
 | Números | Um tipo só, ponto flutuante, como o `real` da GML (sem inteiro separado) |
 | Física | Colisores sem rotação; sem massa (dois `Rigidbody` se empurram por igual); qualquer rampa de terreno é caminhável |
 | Render | Sem sombras; câmera só em perspectiva; modelos sem animação; terreno com uma textura só |

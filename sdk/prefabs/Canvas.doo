@@ -4,7 +4,7 @@ object Canvas
 // e cuida do foco pelo controle: o direcional leva o foco ao vizinho naquela direção, A aperta botões,
 // esquerda/direita ajustam sliders.
 //     var menu = instance_create(Canvas)
-//     var jogar = menu.button("Jogar", 220, 200, 200, 44)
+//     var jogar = menu.button("Jogar", 110, 80, 100, 20)
 //     ...no step:  if (jogar.clicked) { ... }
 // visible = false esconde tudo; active = false desliga o controle (bom para HUD).
 
@@ -59,7 +59,7 @@ function slider(label, x, y, w, min, max, value) {
     e.x = x
     e.y = y
     e.w = w
-    e.h = 44
+    e.h = 19
     e.min = min
     e.max = max
     e.value = value

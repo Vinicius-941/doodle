@@ -84,6 +84,40 @@ var hp = 100
 function take_damage(n) { hp -= n }
 )"};
 
+// with (a GML): o bloco roda como cada alvo, vê os locais de quem chamou, e other é quem abriu o with.
+static const SourceFile chefeSrc = {"chefe.doo", R"(
+object Chefe
+var golpes = 0
+var ultimo = ""
+function bate() {
+    var dano = 3
+    with (Lacaio) {
+        hp -= dano
+        x += 1
+        other.golpes += 1
+        other.ultimo = grita()
+    }
+    return golpes
+}
+function somaHp() {
+    var total = 0
+    with (Lacaio) { total += hp }
+    return total
+}
+function derruba() {
+    with (instance_find(Lacaio, 0)) { instance_destroy() }
+    return instance_number(Lacaio)
+}
+function perto() { return instance_nearest(10, 0, 0, Lacaio).x }
+function euMesmo() { return self == self && object_name(self) == "Chefe" }
+)"};
+static const SourceFile lacaioSrc = {"lacaio.doo", R"(
+object Lacaio
+use SphereCollider
+var hp = 10
+function grita() { return "ai" + hp }
+)"};
+
 // Physics: a ball dropped on a floor comes to rest on top of it and reports the contact.
 static const SourceFile ballSrc = {"ball.doo", R"(
 object Ball
@@ -186,6 +220,7 @@ static int run() {
     vm.addNative("store_install", [](Instance&, std::vector<Value>&) { return Value(); });
     std::unordered_map<std::string, std::shared_ptr<ObjectDef>> defs;
     std::vector<std::shared_ptr<Instance>> scene;
+    vm.scene = &scene;  // with e instance_* procuram nesta cena
     auto spawn = [&](const std::string& name, Vec3 pos) {  // same contract as the simulator's spawn()
         auto inst = vm.instantiate(defs.at(name));
         if (Value* p = inst->field("position")) *p = Value(pos);
@@ -301,9 +336,19 @@ static int run() {
     step(4);
     CHECK(std::get<bool>(uiField("b2", "clicked")) && !std::get<bool>(uiField("b1", "clicked")));
 
-    for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc, hillSrc}, vm, false)) defs[d->name] = d;
+    for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc, hillSrc, chefeSrc, lacaioSrc}, vm, false)) defs[d->name] = d;
     auto level = spawn("Level", {});
     CHECK(std::get<std::string>(vm.call(*level, "report")) == "Enemy 65 2");
+
+    auto chefe = spawn("Chefe", {});
+    for (int i = 0; i < 3; i++) spawn("Lacaio", {double(i) * 5, 0, 0});
+    CHECK(std::get<double>(vm.call(*chefe, "bate")) == 3);           // other.golpes contou os três
+    CHECK(std::get<double>(vm.call(*chefe, "somaHp")) == 3 * 7);     // local total somado de dentro do with
+    CHECK(std::get<std::string>(*chefe->field("ultimo")) == "ai7");  // grita() é a função do lacaio
+    CHECK(std::get<double>(vm.call(*chefe, "perto")) == 11);         // o de x = 10 andou 1
+    CHECK(std::get<double>(vm.call(*chefe, "derruba")) == 2);        // instance_destroy() dentro do with é do alvo
+    CHECK(chefe->alive && std::get<bool>(vm.call(*chefe, "euMesmo")));
+    CHECK(throws("object X\nfunction f() { with (X) { super.g() } }", vm, "x.doo:2:"));
 
     auto ball = spawn("Ball", {0, 3, 0});
     auto ground = spawn("Floor", {0, -0.5, 0});

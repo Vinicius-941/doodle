@@ -44,6 +44,9 @@ enum Op : int {
     OP_RET, OP_ARRAY, OP_INDEX, OP_SET_INDEX,
     OP_GET_MEMBER, OP_SET_MEMBER,  // operand: name const (vec3 x/y/z or instance field); SET pops [obj, value], pushes obj
     OP_INVOKE,                     // obj.method(args) — operands: name const, argc
+    OP_SELF, OP_OTHER,             // ref para quem está rodando / para quem abriu o with
+    OP_WITH_SELF,                  // pops ref e passa a rodar como ela; operand: para onde pular se ela já morreu
+    OP_WITH_RESTORE,               // volta a rodar como quem estava antes do with
 };
 
 struct Function {
@@ -84,8 +87,10 @@ public:
     std::unordered_map<std::string, Value> constants;  // "Button.A" -> 4, inlined at compile time
     // `use X` components -> fields they add (with defaults) when the object doesn't declare them
     std::unordered_map<std::string, std::vector<std::pair<std::string, Value>>> components;
+    // cena do programa rodando agora: with (Objeto) e instance_* procuram nela (o host aponta)
+    std::vector<std::shared_ptr<Instance>>* scene = nullptr;
 
-    VM();  // registers the language built-ins: len, push, print, type, is, destroy_self, vec3, math.*
+    VM();  // registra as funções da linguagem: instance_*, object_*, vec3 e a biblioteca padrão (stdlib.cpp)
     void addNative(const std::string& name, NativeFn fn);
     std::shared_ptr<Instance> instantiate(std::shared_ptr<ObjectDef> def);  // runs field initializers (not create)
     Value call(Instance& self, const std::string& fn, std::vector<Value> args = {});  // no-op if fn is undefined

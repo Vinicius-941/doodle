@@ -53,10 +53,6 @@ function collision(other) {
     }
 }
 
-function sumir() {
-    instance_destroy()
-}
-
 function draw() {
     var squash = 1 + sin(t * 7) * 0.08
     draw_mesh(mesh_sphere, position, vec3(0, 0, 0), vec3(1.25, 1.05 * squash, 1.25), cor)

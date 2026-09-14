@@ -62,12 +62,12 @@ static std::vector<Token> lex(const std::string& s, const std::string& file) {
 
 // ---------- parser -> AST ----------
 
-enum class K { Lit, Name, Member, Index, Call, Array, Unary, Binary, Var, Assign, If, While, For, Return, Block, Expr };
+enum class K { Lit, Name, Member, Index, Call, Array, Unary, Binary, Var, Assign, If, While, For, Return, Block, Expr, With };
 
 // Generic AST node. kids layout per kind:
 //   Member: [obj] text=member   Index: [arr, i]   Call: [callee, args...]   Unary/Binary: operands, text=op
 //   Var: [init?] text=name   Assign: [target, value] text=op   If: [cond, then, else?]   While: [cond, body]
-//   For: [init|null, cond|null, step|null, body]   Return: [value?]   Block: stmts   Expr: [expr]
+//   For: [init|null, cond|null, step|null, body]   Return: [value?]   Block: stmts   Expr: [expr]   With: [alvo, body]
 struct Node {
     K kind;
     int line;
@@ -160,6 +160,14 @@ struct Parser {
             n->kids.push_back(is(";") ? nullptr : expr());
             expect(";");
             n->kids.push_back(is(")") ? nullptr : simple());
+            expect(")");
+            n->kids.push_back(statement());
+            return n;
+        }
+        if (accept("with")) {  // with (Inimigo) { hp -= 1 }: o bloco roda como cada um deles, como na GML
+            auto n = node(K::With);
+            expect("(");
+            n->kids.push_back(expr());
             expect(")");
             n->kids.push_back(statement());
             return n;
@@ -299,6 +307,7 @@ struct Codegen {
     Function* f = nullptr;
     std::vector<std::pair<std::string, int>> scope;  // visible locals -> slot
     int line = 0;
+    int withDepth = 0;  // > 0: dentro de with, onde campos e funções são de quem o bloco está rodando como
 
     DooError err(const std::string& m) const { return DooError(chain[owner]->file + ":" + std::to_string(line) + ": " + m); }
     void emit(int x) { f->code.push_back(x); f->lines.push_back(line); }
@@ -343,6 +352,7 @@ struct Codegen {
         }
         case K::Assign: assign(n); break;
         case K::Expr: expr(n->kids[0].get()); emit(OP_POP); break;
+        case K::With: with(n); break;
         case K::If: {
             expr(n->kids[0].get());
             int jf = jump(OP_JF);
@@ -386,6 +396,67 @@ struct Codegen {
         }
     }
 
+    // with (alvo) corpo: vira a lista de instâncias (uma foto, tirada na entrada) e um laço que roda o corpo
+    // como cada uma. Os locais da função continuam visíveis lá dentro, como na GML.
+    void with(const Node* n) {
+        expr(n->kids[0].get());
+        native("__with_targets", 1);
+        size_t mark = scope.size();
+        int lista = declare(" with.lista"), i = declare(" with.i");  // com espaço: nenhum código escreve esse nome
+        emit(OP_SET_LOCAL, lista);
+        emit(OP_CONST, constant(Value(0.0)));
+        emit(OP_SET_LOCAL, i);
+        int topo = here();
+        emit(OP_GET_LOCAL, i);
+        emit(OP_GET_LOCAL, lista);
+        native("array_length", 1);
+        emit(OP_LT);
+        int fim = jump(OP_JF);
+        emit(OP_GET_LOCAL, lista);
+        emit(OP_GET_LOCAL, i);
+        emit(OP_INDEX);
+        int pula = jump(OP_WITH_SELF);
+        withDepth++;
+        stmt(n->kids[1].get());
+        withDepth--;
+        line = n->line;
+        emit(OP_WITH_RESTORE);
+        patch(pula);
+        emit(OP_GET_LOCAL, i);
+        emit(OP_CONST, constant(Value(1.0)));
+        emit(OP_ADD);
+        emit(OP_SET_LOCAL, i);
+        emit(OP_JMP, topo);
+        patch(fim);
+        scope.resize(mark);
+    }
+
+
+    // Dentro de with o tipo do alvo não é conhecido na compilação, então campo é por nome em quem roda (x/y/z
+    // viram position na VM). Membro vazio = o próprio campo (hp -= 1); senão, membro dele (velocity.y = 9).
+    void assignSelf(const std::string& base, const std::string& membro, const std::string& op, const Node* valor) {
+        int kb = constant(Value(base));
+        emit(OP_SELF);
+        if (membro.empty()) {
+            if (!op.empty()) {
+                emit(OP_SELF);
+                emit(OP_GET_MEMBER, kb);
+            }
+        } else {
+            emit(OP_SELF);
+            emit(OP_GET_MEMBER, kb);
+            if (!op.empty()) {
+                emit(OP_DUP);
+                emit(OP_GET_MEMBER, constant(Value(membro)));
+            }
+        }
+        expr(valor);
+        if (!op.empty()) emit(binop(op));
+        if (!membro.empty()) emit(OP_SET_MEMBER, constant(Value(membro)));
+        emit(OP_SET_MEMBER, kb);
+        emit(OP_POP);
+    }
+
     // position.x/y/z quando o objeto não declarou x/y/z: devolve o slot de position, senão -1
     int xyz(const std::string& name) const {
         if (name != "x" && name != "y" && name != "z") return -1;
@@ -395,6 +466,26 @@ struct Codegen {
     void assign(const Node* n) {
         Node* target = n->kids[0].get();
         std::string op = n->text.substr(0, n->text.size() - 1);  // "+=" -> "+", "=" -> ""
+        const Node* base = target->kind == K::Member ? target->kids[0].get() : target;
+        bool baseLivre = base->kind == K::Name && local(base->text) < 0;
+        bool refDireta = baseLivre && target->kind == K::Member && (base->text == "self" || base->text == "other");
+        if (refDireta) {  // other.pontos += 1: é uma ref, altera a instância direto
+            int km = constant(Value(target->text));
+            expr(base);
+            if (!op.empty()) {
+                emit(OP_DUP);
+                emit(OP_GET_MEMBER, km);
+            }
+            expr(n->kids[1].get());
+            line = n->line;
+            if (!op.empty()) emit(binop(op));
+            emit(OP_SET_MEMBER, km);
+            return emit(OP_POP);
+        }
+        if (withDepth > 0 && baseLivre) {
+            if (target->kind == K::Name) return assignSelf(target->text, "", op, n->kids[1].get());
+            if (target->kind == K::Member) return assignSelf(base->text, target->text, op, n->kids[1].get());
+        }
         if (target->kind == K::Name && local(target->text) < 0 && field(target->text) < 0) {
             if (int p = xyz(target->text); p >= 0) {  // x += 5 mexe em position.x
                 int k = constant(Value(target->text));
@@ -433,6 +524,7 @@ struct Codegen {
 
     // `ns.name` where ns is not a variable -> "ns.name" (SDK namespace or constant), else ""
     std::string qualified(const Node* m) const {
+        if (withDepth > 0) return {};
         Node* base = m->kids[0].get();
         if (base->kind != K::Name || local(base->text) >= 0 || field(base->text) >= 0) return {};
         return base->text + "." + m->text;
@@ -470,14 +562,18 @@ struct Codegen {
     }
 
     void call(const Node* n) {
-        if (superCall(n)) return;
         Node* callee = n->kids[0].get();
+        bool chamaSuper = callee->kind == K::Member && callee->kids[0]->kind == K::Name && callee->kids[0]->text == "super";
+        if (withDepth > 0 && chamaSuper) throw err("super não funciona dentro de with");
+        if (superCall(n)) return;
         int argc = (int)n->kids.size() - 1;
         bool method = callee->kind == K::Member && qualified(callee).empty();  // enemy.take_damage(10)
+        bool deQuemRoda = withDepth > 0 && callee->kind == K::Name && !vm.nativeIndex.count(callee->text);
         if (method) expr(callee->kids[0].get());
+        if (deQuemRoda) emit(OP_SELF);
         for (size_t i = 1; i < n->kids.size(); i++) expr(n->kids[i].get());
         line = n->line;
-        if (method) {
+        if (method || deQuemRoda) {
             emit(OP_INVOKE, constant(Value(callee->text)));
             return emit(argc);
         }
@@ -498,8 +594,18 @@ struct Codegen {
             if (n->value.index() == 0) emit(OP_NIL); else emit(OP_CONST, constant(n->value));
             break;
         case K::Name: {
+            if (n->text == "other" && withDepth > 0) { emit(OP_OTHER); break; }  // quem abriu o with
             int s = local(n->text);
             if (s >= 0) { emit(OP_GET_LOCAL, s); break; }
+            if (n->text == "self") { emit(OP_SELF); break; }
+            if (withDepth > 0) {  // o que é global primeiro; o resto é campo de quem o bloco roda como
+                if (objects.count(n->text)) { emit(OP_CONST, constant(Value(n->text))); break; }
+                if (auto c = vm.constants.find(n->text); c != vm.constants.end()) { emit(OP_CONST, constant(c->second)); break; }
+                if (vm.nativeIndex.count(n->text)) { native(n->text, 0); break; }
+                emit(OP_SELF);
+                emit(OP_GET_MEMBER, constant(Value(n->text)));
+                break;
+            }
             s = field(n->text);
             if (s >= 0) { emit(OP_GET_FIELD, s); break; }
             if (objects.count(n->text)) { emit(OP_CONST, constant(Value(n->text))); break; }  // object type = its name

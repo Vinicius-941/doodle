@@ -15,7 +15,6 @@ var recorde = 0
 var noite = false
 var ps1 = false
 var orbita = 0
-var coisas = []         // moedas e bolotas da fase: somem na troca
 var nomes = ["O vale", "Os morros", "A noite"]
 
 var player
@@ -291,11 +290,9 @@ function rotulos() {
 
 // ---------- montagem das fases ----------
 
-function limpar() {
-    for (var i = 0; i < array_length(coisas); i += 1) {
-        if (coisas[i]) { coisas[i].sumir() }
-    }
-    coisas = []
+function limpar() {   // troca de fase: moedas e bolotas vão embora sem contar ponto
+    with (Coin) { instance_destroy() }
+    with (Blob) { instance_destroy() }
     total = 0
 }
 
@@ -313,7 +310,7 @@ function moeda(x, z) {
 }
 
 function moedaEm(pos) {
-    array_push(coisas, instance_create(Coin, pos))
+    instance_create(Coin, pos)
     total += 1
 }
 
@@ -327,7 +324,6 @@ function bolota(x, z, velocidade, alcance, cor) {
     b.velocidade = velocidade
     b.alcance = alcance
     b.cor = cor
-    array_push(coisas, b)
 }
 
 function reposicionar() {

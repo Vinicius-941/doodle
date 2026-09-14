@@ -118,6 +118,17 @@ static Value& field(const Value& v, const std::string& name) {  // obj.name on a
     return *f;  // the scene keeps the instance alive
 }
 
+// inimigo.x numa instância que não declarou x: é position.x, como o x solto (e como na GML)
+static double* axis(const Value& v, const std::string& name) {
+    if ((name != "x" && name != "y" && name != "z") || !std::holds_alternative<Ref>(v)) return nullptr;
+    auto inst = instanceOf(v, "." + name);
+    if (inst->field(name)) return nullptr;
+    Value* pos = inst->field("position");
+    auto p = pos ? std::get_if<Vec3>(pos) : nullptr;
+    if (!p) return nullptr;
+    return name == "x" ? &p->x : name == "y" ? &p->y : &p->z;
+}
+
 VM::VM() {
     addNative("show_debug_message", [](Instance&, std::vector<Value>& a) {
         std::string line;
@@ -146,6 +157,63 @@ VM::VM() {
     });
     addNative("vec3", [](Instance&, std::vector<Value>& a) {
         return Value(a.empty() ? Vec3{} : Vec3{argNum(a, 0), argNum(a, 1), argNum(a, 2)});
+    });
+
+    // --- instâncias da cena (with e os instance_* da GML) ---
+    auto kindOf = [](const Instance& i, const std::string& tipo) {
+        return std::find(i.def->kinds.begin(), i.def->kinds.end(), tipo) != i.def->kinds.end();
+    };
+    auto doTipo = [this, kindOf](const std::string& tipo) {  // vivas, do tipo ou de um descendente
+        std::vector<std::shared_ptr<Instance>> out;
+        if (scene)
+            for (auto& inst : *scene)
+                if (inst->alive && kindOf(*inst, tipo)) out.push_back(inst);
+        return out;
+    };
+    addNative("__with_targets", [doTipo](Instance&, std::vector<Value>& a) {  // with (x): tipo, ref ou array de refs
+        auto out = std::make_shared<Array>();
+        if (a.size() != 1) throw std::runtime_error("with espera um alvo");
+        if (auto t = std::get_if<std::string>(&a[0]))
+            for (auto& inst : doTipo(*t)) out->push_back(Value(Ref{inst}));
+        else if (std::holds_alternative<Ref>(a[0]))
+            out->push_back(a[0]);
+        else if (auto arr = std::get_if<std::shared_ptr<Array>>(&a[0]))
+            *out = **arr;  // cópia: o bloco pode mexer no array sem bagunçar a volta
+        else if (!std::holds_alternative<std::monostate>(a[0]))
+            throw std::runtime_error("with espera um objeto, uma referência ou um array de referências");
+        return Value(out);
+    });
+    addNative("instance_exists", [doTipo](Instance&, std::vector<Value>& a) {  // (Tipo) ou (ref)
+        if (a.size() != 1) throw std::runtime_error("instance_exists() recebe 1 argumento");
+        if (auto t = std::get_if<std::string>(&a[0])) return Value(!doTipo(*t).empty());
+        auto r = std::get_if<Ref>(&a[0]);
+        auto inst = r ? r->p.lock() : nullptr;
+        return Value(inst && inst->alive);
+    });
+    addNative("instance_number", [doTipo](Instance&, std::vector<Value>& a) {
+        if (a.size() != 1 || !std::holds_alternative<std::string>(a[0])) throw std::runtime_error("instance_number(Tipo)");
+        return Value((double)doTipo(std::get<std::string>(a[0])).size());
+    });
+    addNative("instance_find", [doTipo](Instance&, std::vector<Value>& a) {  // (Tipo, n) -> ref ou nil
+        if (a.size() != 2 || !std::holds_alternative<std::string>(a[0])) throw std::runtime_error("instance_find(Tipo, n)");
+        auto todas = doTipo(std::get<std::string>(a[0]));
+        double n = argNum(a, 1);
+        if (n < 0 || n >= todas.size()) return Value();
+        return Value(Ref{todas[(size_t)n]});
+    });
+    addNative("instance_nearest", [doTipo](Instance&, std::vector<Value>& a) {  // (x, y, z, Tipo) -> ref ou nil
+        if (a.size() != 4 || !std::holds_alternative<std::string>(a[3])) throw std::runtime_error("instance_nearest(x, y, z, Tipo)");
+        Vec3 p{argNum(a, 0), argNum(a, 1), argNum(a, 2)};
+        std::shared_ptr<Instance> melhor;
+        double menor = 0;
+        for (auto& inst : doTipo(std::get<std::string>(a[3]))) {
+            auto pos = inst->field("position");
+            auto v = pos ? std::get_if<Vec3>(pos) : nullptr;
+            if (!v) continue;
+            Vec3 d = *v - p;
+            if (!melhor || d.dot(d) < menor) { melhor = inst; menor = d.dot(d); }
+        }
+        return melhor ? Value(Ref{melhor}) : Value();
     });
     registerStdlib(*this);
 }
@@ -192,6 +260,10 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
     struct DepthGuard { int& d; ~DepthGuard() { --d; } } guard{++depth};
     if (depth > 200) throw std::runtime_error("recursão profunda demais (stack overflow)");
     locals.resize(f.nlocals);
+    // `me` é quem o código está rodando como: começa sendo o dono da função e troca dentro de with.
+    // Campos por slot (OP_GET_FIELD) continuam sendo do dono; dentro de with o compilador acessa por nome.
+    Instance* me = &self;
+    std::vector<std::shared_ptr<Instance>> withStack, withHold;  // quem rodava antes de cada with / quem roda agora
     std::vector<Value> st;
     size_t pc = 0;
     auto pop = [&] { Value v = std::move(st.back()); st.pop_back(); return v; };
@@ -256,7 +328,7 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
             case OP_NATIVE: {
                 int idx = f.code[pc++];
                 auto a = args(f.code[pc++]);
-                st.push_back(natives[idx](self, a));
+                st.push_back(natives[idx](*me, a));
                 break;
             }
             case OP_RET: return pop();
@@ -275,6 +347,7 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
                 std::string m = name();
                 Value v = pop();
                 if (double* c = component(v, m)) st.push_back(Value(*c));
+                else if (double* e = axis(v, m)) st.push_back(Value(*e));
                 else st.push_back(field(v, m));
                 break;
             }
@@ -282,6 +355,7 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
                 std::string m = name();
                 Value x = pop(), v = pop();
                 if (double* c = component(v, m)) *c = num(x, "=");
+                else if (double* e = axis(v, m)) *e = num(x, "=");
                 else field(v, m) = std::move(x);
                 st.push_back(std::move(v));
                 break;
@@ -298,6 +372,27 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
                 st.push_back(run(*inst, g, std::move(a)));
                 break;
             }
+            case OP_SELF: st.push_back(Value(Ref{me->weak_from_this()})); break;
+            case OP_OTHER:
+                if (withStack.empty()) throw std::runtime_error("other só existe dentro de with (ou como parâmetro de collision)");
+                st.push_back(Value(Ref{withStack.back()}));
+                break;
+            case OP_WITH_SELF: {
+                int skip = f.code[pc++];
+                Value v = pop();
+                auto r = std::get_if<Ref>(&v);
+                auto inst = r ? r->p.lock() : nullptr;
+                if (!inst || !inst->alive) { pc = skip; break; }  // destruída no meio do with: pula
+                withStack.push_back(me->shared_from_this());
+                me = inst.get();
+                withHold.push_back(std::move(inst));  // não deixa a instância sumir enquanto o bloco roda
+                break;
+            }
+            case OP_WITH_RESTORE:
+                me = withStack.back().get();
+                withStack.pop_back();
+                withHold.pop_back();
+                break;
             default: throw std::runtime_error("bytecode inválido");
             }
         }

@@ -22,10 +22,6 @@ function collision(other) {
     }
 }
 
-function sumir() {   // trocou de fase: a moeda vai embora sem contar ponto
-    instance_destroy()
-}
-
 function draw() {
     draw_mesh(mesh_cylinder, position, vec3(90, spin, 0), vec3(0.8, 0.06, 0.8), 0xFFD23F)
 }
