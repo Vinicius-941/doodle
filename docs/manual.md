@@ -56,6 +56,7 @@ build\Release\doodle.exe
 | `build\Release\doodle.exe --console` | Liga direto em tela cheia (modo console) |
 | `build\Release\doodle.exe --fps` | Liga com o contador de quadros e escreve uma linha por segundo no terminal |
 | `build\Release\doodle.exe --check` | Só compila o firmware e todos os jogos e mostra os erros |
+| `build\Release\doodle.exe --build games/meu-jogo jogo.doobc` | Compila um jogo para bytecode, para distribuir sem o código (seção 3) |
 | `ctest --test-dir build -C Release` | Testes do compilador, da VM, da física e dos prefabs |
 
 Os `.doo` são compilados na hora em que o programa abre: depois de editar um jogo, basta abri-lo de novo
@@ -102,6 +103,25 @@ games/meu-jogo/
   o jogo fecha e o console volta ao menu.
 - Todos os `.doo` da pasta são compilados juntos, então os objetos se enxergam pelo nome (`instance_create(Inimigo, pos)`).
 - `info.txt`: a linha `titulo:` é o nome mostrado no menu (sem ela, aparece o id).
+
+### Jogo compilado (`jogo.doobc`)
+
+Para distribuir sem o código-fonte, compile para bytecode e entregue a pasta com `jogo.doobc` no lugar dos
+`.doo` (é o que a loja faz):
+
+```bash
+build\Release\doodle.exe --build games/meu-jogo jogo.doobc
+```
+
+Uma pasta com `main.doo` roda do código; sem ele, o console lê o `jogo.doobc`. O arquivo leva os objetos já
+compilados junto com os prefabs do SDK, então o jogo não quebra se o SDK mudar depois. Ele carrega as
+funções do console por nome e é recusado com uma mensagem clara se:
+
+- foi compilado para outra versão do bytecode (compile de novo);
+- pede uma função que este console não tem;
+- chama uma função exclusiva do firmware;
+- está cortado ou adulterado — cada instrução, índice e salto é conferido antes de rodar, então um arquivo
+  forjado não derruba o console.
 
 ## 4. Primeiro jogo
 
@@ -571,7 +591,7 @@ quando o objeto é destruído.
 | `store_error()` | Mensagem do último erro da loja (`""` se deu tudo certo) |
 | `store_can_uninstall(id)` | O jogo veio da loja (só esses podem ser desinstalados) |
 
-"Instalado" é ter uma pasta com `main.doo` em `games/`, tenha vindo da loja ou não. Baixar e instalar é
+"Instalado" é ter uma pasta com `main.doo` ou `jogo.doobc` em `games/`, tenha vindo da loja ou não. Baixar e instalar é
 coisa do firmware (seção 13).
 
 ### 9.7 Física

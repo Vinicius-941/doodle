@@ -10,6 +10,13 @@ static std::shared_ptr<Instance> live(const Ref& r) {
     return inst && inst->alive ? inst : nullptr;
 }
 
+bool nativaDoFirmware(const std::string& nome) {
+    static const char* loja[] = {"store_set_url", "store_refresh", "store_install", "store_uninstall"};
+    if (nome.rfind("system_", 0) == 0) return true;
+    for (const char* n : loja) if (nome == n) return true;
+    return false;
+}
+
 bool truthy(const Value& v) {
     if (auto b = std::get_if<bool>(&v)) return *b;
     if (auto n = std::get_if<double>(&v)) return *n != 0;
@@ -284,8 +291,13 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
     std::vector<std::shared_ptr<Instance>> withStack, withHold;  // quem rodava antes de cada with / quem roda agora
     std::vector<Value> st;
     size_t pc = 0;
-    auto pop = [&] { Value v = std::move(st.back()); st.pop_back(); return v; };
+    auto topo = [&]() -> Value& {
+        if (st.empty()) throw std::runtime_error("bytecode inválido (pilha vazia)");
+        return st.back();
+    };
+    auto pop = [&] { Value v = std::move(topo()); st.pop_back(); return v; };
     auto args = [&](int argc) {
+        if (argc < 0 || size_t(argc) > st.size()) throw std::runtime_error("bytecode inválido (argumentos)");
         std::vector<Value> a(std::make_move_iterator(st.end() - argc), std::make_move_iterator(st.end()));
         st.erase(st.end() - argc, st.end());
         return a;
@@ -304,7 +316,7 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
             case OP_CONST: st.push_back(f.consts[f.code[pc++]]); break;
             case OP_NIL: st.emplace_back(); break;
             case OP_POP: st.pop_back(); break;
-            case OP_DUP: st.push_back(st.back()); break;
+            case OP_DUP: st.push_back(topo()); break;
             case OP_GET_LOCAL: st.push_back(locals[f.code[pc++]]); break;
             case OP_SET_LOCAL: locals[f.code[pc++]] = pop(); break;
             case OP_GET_FIELD: st.push_back(self.fields[f.code[pc++]]); break;
@@ -316,10 +328,10 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
                 break;
             }
             case OP_NEG:
-                if (auto v = std::get_if<Vec3>(&st.back())) st.back() = Value(*v * -1);
-                else st.back() = Value(-num(st.back(), "-"));
+                if (auto v = std::get_if<Vec3>(&topo())) topo() = Value(*v * -1);
+                else topo() = Value(-num(topo(), "-"));
                 break;
-            case OP_NOT: st.back() = Value(!truthy(st.back())); break;
+            case OP_NOT: topo() = Value(!truthy(topo())); break;
             case OP_EQ: case OP_NE: {
                 Value b = pop(), a = pop();
                 bool eq = static_cast<const ValueBase&>(a) == static_cast<const ValueBase&>(b);
@@ -416,6 +428,7 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
                 break;
             }
             case OP_WITH_RESTORE:
+                if (withStack.empty()) throw std::runtime_error("bytecode inválido (with)");
                 me = withStack.back().get();
                 withStack.pop_back();
                 withHold.pop_back();

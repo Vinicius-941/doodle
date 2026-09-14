@@ -10,8 +10,10 @@ faz `GET`. Serve em `python -m http.server`, nginx, Apache, GitHub Pages, S3 —
 python -m http.server 8080 --directory store-backend\loja
 ```
 
-O primeiro comando copia os jogos de `games/` para `store-backend/loja/` (fora do controle de versão) e
-gera o `catalogo.txt`. O segundo põe a pasta no ar. No console, a loja aparece na terceira coluna do menu:
+O primeiro comando copia os jogos de `games/` para `store-backend/loja/` (fora do controle de versão),
+**compila cada um para `jogo.doobc` e tira os `.doo`** — a loja entrega o jogo sem o código-fonte — e
+gera o `catalogo.txt`. Precisa do simulador compilado (usa `build\Release\doodle.exe --build`). Para
+publicar com o código, use `publicar.ps1 -Fonte`. O segundo põe a pasta no ar. No console, a loja aparece na terceira coluna do menu:
 **A** instala (ou abre, se já estiver instalado) e **X** atualiza a lista.
 
 O endereço fica salvo em `saves/sistema.sav`, na chave `loja`, e o padrão é `http://localhost:8080`.
@@ -32,13 +34,13 @@ dos saves do console:
 jogo	quadrado
 titulo	Quadrado
 info	O primeiro teste do console
-arquivo	main.doo	412
+arquivo	jogo.doobc	44107
 arquivo	icon.png	3120
 ```
 
 `titulo` e `info` saem das linhas `titulo:` e `descricao:` do `info.txt` do jogo. Cada `arquivo` traz o
 caminho relativo e o tamanho em bytes (o tamanho só serve para a barra de progresso). O jogo precisa ter
-`main.doo`; sem ele o console recusa o pacote.
+`jogo.doobc` (ou `main.doo`, se publicado com `-Fonte`); sem nenhum dos dois o console recusa o pacote.
 
 ## O que o console recusa
 

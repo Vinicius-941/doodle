@@ -1,15 +1,19 @@
 # Monta a pasta que o servidor da loja serve (store-backend/loja) a partir de games/.
 #
-#   .\store-backend\publicar.ps1              publica todos os jogos
-#   .\store-backend\publicar.ps1 quadrado     publica só um
+#   .\store-backend\publicar.ps1                  publica todos os jogos, compilados (sem o código-fonte)
+#   .\store-backend\publicar.ps1 quadrado         publica só um
+#   .\store-backend\publicar.ps1 -Fonte           publica com os .doo em vez do jogo.doobc
 #
+# Compilar usa build\Release\doodle.exe --build, então compile o simulador antes.
 # Depois é só servir a pasta como arquivo estático:
 #   python -m http.server 8080 --directory store-backend\loja
-param([string[]]$jogos)
+param([string[]]$jogos, [switch]$Fonte)
 
 $raiz = Split-Path -Parent $PSScriptRoot
 $origem = Join-Path $raiz "games"
 $destino = Join-Path $PSScriptRoot "loja"
+$doodle = Join-Path $raiz "build\Release\doodle.exe"
+if (-not $Fonte -and -not (Test-Path $doodle)) { throw "compile o simulador antes (falta $doodle), ou publique com -Fonte" }
 
 if (-not $jogos) {
     $jogos = (Get-ChildItem $origem -Directory | Where-Object { Test-Path (Join-Path $_.FullName "main.doo") }).Name
@@ -28,6 +32,12 @@ foreach ($id in $jogos) {
     Copy-Item $pasta $alvo -Recurse
     $marca = Join-Path $alvo ".loja"
     if (Test-Path $marca) { Remove-Item $marca }   # marca de instalação, não se republica
+    if (-not $Fonte) {   # o jogo vai compilado: sai o código, entra o jogo.doobc
+        $saida = & $doodle --build "games/$id" (Join-Path $alvo "jogo.doobc")
+        if ($LASTEXITCODE -ne 0) { throw "não compilou $id`n$saida" }
+        # extensão exata: o -Filter *.doo do Windows também pega jogo.doobc (pelo nome curto 8.3)
+        Get-ChildItem $alvo -Recurse -File | Where-Object { $_.Extension -eq '.doo' } | Remove-Item
+    }
 
     $titulo = $id
     $info = ""

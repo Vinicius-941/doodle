@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <fstream>
 #include <unordered_map>
+#include "bytecode.h"
 #include "compiler.h"
 #include "obj.h"
 #include "physics.h"
@@ -264,6 +265,12 @@ function anda() {
 }
 )doo"};
 
+static bool loadFails(const std::string& data, const VM& vm, bool privileged, const char* motivo) {
+    try { loadBytecode(data, vm, privileged, "jogo.doobc"); }
+    catch (const DooError& e) { return std::string(e.what()).find(motivo) != std::string::npos; }
+    return false;
+}
+
 static bool throws(const char* code, const VM& vm, const char* expectedPrefix) {
     try { compile(code, "x.doo", vm, false); }
     catch (const DooError& e) { return std::string(e.what()).rfind(expectedPrefix, 0) == 0; }
@@ -359,6 +366,44 @@ static int run() {
     CHECK(std::get<std::string>(vm.call(*dic, "compartilhado")) == "9struct");  // b = a aponta para o mesmo
     try { vm.call(*dic, "falta"); CHECK(false); }
     catch (const DooError& e) { CHECK(std::string(e.what()).find("não tem 'b'") != std::string::npos); }
+
+    // Bytecode em arquivo: ida e volta dá o mesmo resultado, com herança, with, struct e nativas ligadas por nome
+    {
+        auto originais = compileAll({birdSrc, gmlSrc, dicSrc}, vm, false, {animalSrc});
+        std::string bc = saveBytecode(originais, vm);
+        auto lidos = loadBytecode(bc, vm, false, "jogo.doobc");
+        CHECK(lidos.size() == originais.size() && lidos[0]->name == "Bird" && lidos[0]->kinds == originais[0]->kinds);
+        auto ave = vm.instantiate(lidos[0]);
+        CHECK(std::get<std::string>(vm.call(*ave, "describe")) == std::get<std::string>(vm.call(*vm.instantiate(originais[0]), "describe")));
+        auto gml2 = vm.instantiate(lidos[1]);
+        CHECK(std::get<std::string>(vm.call(*gml2, "texto")) == "Doo46");
+        auto dic2 = vm.instantiate(lidos[2]);
+        CHECK(std::get<double>(vm.call(*dic2, "cria")) == 7532);
+        CHECK(saveBytecode(lidos, vm) == bc);  // salvar de novo o que foi lido dá os mesmos bytes
+
+        // Arquivo de fora não é confiável: cortado, adulterado, de outra versão, pedindo firmware
+        CHECK(loadFails(bc.substr(0, bc.size() / 2), vm, false, "cortado"));
+        CHECK(loadFails("DOOBC", vm, false, "cortado"));
+        CHECK(loadFails(std::string("OUTRO!") + bc.substr(6), vm, false, "não é um arquivo"));
+        std::string outraVersao = bc;
+        outraVersao[6] = 99;
+        CHECK(loadFails(outraVersao, vm, false, "versão 99"));
+        std::string sobra = bc + "x";
+        CHECK(loadFails(sobra, vm, false, "sobrou"));
+        auto fw = compileAll({{"fw.doo", "object Fw\nfunction f() { system_launch(\"a\") }"}}, vm, true);
+        CHECK(loadFails(saveBytecode(fw, vm), vm, false, "exclusiva do firmware"));
+        CHECK(loadBytecode(saveBytecode(fw, vm), vm, true, "fw.doobc").size() == 1);  // o firmware pode
+
+        // um salto apontando para o meio de uma instrução: a carga recusa em vez de a VM executar lixo
+        auto um = compileAll({{"s.doo", "object S\nfunction f(n) { while (n > 0) { n -= 1 } return n }"}}, vm, false);
+        Function& f = um[0]->funcs[um[0]->funcIndex.at("f")];
+        CHECK(f.code[0] == OP_GET_LOCAL && f.code[5] == OP_JF);  // n > 0 abre o laço: GET_LOCAL, CONST, GT, JF
+        f.code[6] = 1;                                          // o JF agora cai no meio do GET_LOCAL
+        CHECK(loadFails(saveBytecode(um, vm), vm, false, "operando inválido"));
+        f.code[6] = 0;
+        f.code.back() = OP_POP;                                 // sem o RET final, a VM andaria para fora do código
+        CHECK(loadFails(saveBytecode(um, vm), vm, false, "termina sem return"));
+    }
 
     auto birds = compileAll({birdSrc}, vm, false, {animalSrc});  // Animal comes from the library, like an SDK prefab
     CHECK(birds.size() == 2 && birds[0]->name == "Bird");

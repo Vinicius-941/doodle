@@ -106,6 +106,9 @@ private:
 };
 
 bool truthy(const Value& v);
+
+// system_* e as funções da loja que instalam/apagam: só o firmware chama (compilador e carregador de bytecode).
+bool nativaDoFirmware(const std::string& nome);
 std::string toString(const Value& v);
 
 // Argument checks for natives; throw a readable error on a missing/wrong argument.

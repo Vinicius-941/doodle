@@ -28,6 +28,7 @@
 #include <thread>
 #include <tuple>
 #include <unordered_map>
+#include "bytecode.h"
 #include "compiler.h"
 #include "net.h"
 #include "obj.h"
@@ -786,11 +787,17 @@ static std::string readFile(const fs::path& p) {
 
 static fs::path gameDir(const std::string& id) { return root / "games" / fs::u8path(id); }
 
+// Um jogo é uma pasta com o código-fonte (main.doo) ou com o jogo compilado (jogo.doobc, o que a loja entrega).
+static bool isGame(const fs::path& dir) {
+    std::error_code ec;
+    return fs::exists(dir / "main.doo", ec) || fs::exists(dir / "jogo.doobc", ec);
+}
+
 static std::vector<std::string> installedGames() {
     std::vector<std::string> ids;
     std::error_code ec;
     for (auto& e : fs::directory_iterator(root / "games", ec))
-        if (fs::exists(e.path() / "main.doo") && e.path().extension() != ".parcial")  // pula download pela metade
+        if (isGame(e.path()) && e.path().extension() != ".parcial")  // pula download pela metade
             ids.push_back(e.path().filename().u8string());
     return ids;
 }
@@ -824,6 +831,15 @@ static std::shared_ptr<Instance> spawnIn(Program& prog, const std::shared_ptr<Ob
     return inst;
 }
 
+// Os objetos de um programa: com main.doo compila o fonte (quem está desenvolvendo); sem ele, lê jogo.doobc.
+static std::vector<std::shared_ptr<ObjectDef>> program(const std::string& dir, bool privileged) {
+    fs::path pasta = root / fs::u8path(dir);
+    std::error_code ec;
+    if (!fs::exists(pasta / "main.doo", ec) && fs::exists(pasta / "jogo.doobc", ec))
+        return loadBytecode(readFile(pasta / "jogo.doobc"), vm, privileged, dir + "/jogo.doobc");
+    return compileAll(sources(dir), vm, privileged, prefabs());
+}
+
 static void load(Program& prog, const std::string& id, const std::string& dir, const fs::path& base, bool privileged) {
     prog = Program{};
     prog.id = id;
@@ -833,7 +849,7 @@ static void load(Program& prog, const std::string& id, const std::string& dir, c
     cam = {};  // each program starts with the default camera, and unpaused
     timeScale = 1;
     mode = -1;
-    auto defs = compileAll(sources(dir), vm, privileged, prefabs());
+    auto defs = program(dir, privileged);
     for (auto& d : defs) prog.objects[d->name] = d;
     spawnIn(prog, defs[0], nullptr);
 }
@@ -986,9 +1002,9 @@ static void installGame(const std::string& id) {
         done += (long long)data.size();
         storeProgress = item.size > 0 ? std::min(1.0, double(done) / item.size) : 0.5;
     }
-    if (!fs::exists(tmp / "main.doo")) {
+    if (!isGame(tmp)) {
         fs::remove_all(tmp, ec);
-        throw std::runtime_error("pacote sem main.doo");
+        throw std::runtime_error("pacote sem main.doo nem jogo.doobc");
     }
     std::ofstream(tmp / ".loja", std::ios::binary) << storeUrl << "\n";  // marca de origem: só isto pode desinstalar
     fs::remove_all(gameDir(id), ec);
@@ -1458,7 +1474,7 @@ static void registerSdk() {
         for (auto& id : installedGames()) list->push_back(Value(id));
         return Value(list);
     });
-    vm.addNative("game_installed", [](Instance&, Args& a) { return Value(fs::exists(gameDir(str(a, 0)) / "main.doo")); });
+    vm.addNative("game_installed", [](Instance&, Args& a) { return Value(isGame(gameDir(str(a, 0)))); });
 
     // loja online (só o firmware): o catálogo e os downloads rodam na thread da loja
     vm.addNative("store_set_url", [](Instance&, Args& a) {
@@ -1649,7 +1665,7 @@ static void frame() {
 static int checkAll() {
     auto check = [](const std::string& dir, bool privileged) {
         try {
-            compileAll(sources(dir), vm, privileged, prefabs());
+            program(dir, privileged);
             printf("ok    %s\n", dir.c_str());
             return true;
         } catch (const std::exception& e) {
@@ -1714,16 +1730,31 @@ static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 
 int main(int argc, char** argv) {
     bool check = false, console = false;
+    std::string buildDir, buildOut;
     root = fs::u8path(DOODLE_ROOT);
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--check") check = true;
+        else if (arg == "--build" && i + 2 < argc) { buildDir = argv[++i]; buildOut = argv[++i]; }  // jogo -> .doobc
         else if (arg == "--console") console = true;          // liga direto em tela cheia
         else if (arg == "--fps") showFps = fpsLog = true;     // contador na tela e uma linha por segundo no console
         else root = arg;
     }
     registerSdk();
     if (check) return checkAll();
+    if (!buildDir.empty()) {
+        try {
+            std::string bc = saveBytecode(compileAll(sources(buildDir), vm, false, prefabs()), vm);
+            std::ofstream out(fs::u8path(buildOut), std::ios::binary);
+            out.write(bc.data(), (std::streamsize)bc.size());
+            if (!out) throw std::runtime_error("não consegui escrever " + buildOut);
+            printf("ok    %s -> %s (%zu bytes)\n", buildDir.c_str(), buildOut.c_str(), bc.size());
+            return 0;
+        } catch (const std::exception& e) {
+            printf("ERRO  %s\n", e.what());
+            return 1;
+        }
+    }
 
     SetProcessDPIAware();
     WNDCLASSW wc = {};
