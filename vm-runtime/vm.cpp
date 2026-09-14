@@ -38,15 +38,20 @@ std::string toString(const Value& v) {
         const Vec3& p = std::get<Vec3>(v);
         return "vec3(" + toString(Value(p.x)) + ", " + toString(Value(p.y)) + ", " + toString(Value(p.z)) + ")";
     }
-    default: {
+    case 6: {
         auto inst = live(std::get<Ref>(v));
         return inst ? "<" + inst->def->name + ">" : "<destruído>";
+    }
+    default: {
+        std::string s;
+        for (auto& [k, e] : std::get<std::shared_ptr<Struct>>(v)->m) s += (s.empty() ? "" : ", ") + k + ": " + toString(e);
+        return "{" + s + "}";
     }
     }
 }
 
 static const char* typeName(const Value& v) {
-    static const char* names[] = {"nil", "bool", "número", "string", "array", "vec3", "objeto"};
+    static const char* names[] = {"nil", "bool", "número", "string", "array", "vec3", "objeto", "struct"};
     return names[v.index()];
 }
 
@@ -85,7 +90,20 @@ static Value arith(int op, const Value& a, const Value& b) {
     }
 }
 
-static Value& element(const Value& a, const Value& i) {
+// s["chave"] num struct: ler chave que não existe é erro (como na GML); escrever cria.
+static Value& entry(Struct& s, const std::string& k, bool escrever) {
+    auto it = s.m.find(k);
+    if (it != s.m.end()) return it->second;
+    if (!escrever) throw std::runtime_error("o struct não tem '" + k + "' (struct_exists confere antes)");
+    return s.m[k];
+}
+
+static Value& element(const Value& a, const Value& i, bool escrever = false) {
+    if (auto st = std::get_if<std::shared_ptr<Struct>>(&a)) {
+        auto k = std::get_if<std::string>(&i);
+        if (!k) throw std::runtime_error("struct se indexa com texto: s[\"chave\"]");
+        return entry(**st, *k, escrever);
+    }
     auto arr = std::get_if<std::shared_ptr<Array>>(&a);
     if (!arr) throw std::runtime_error(std::string("não dá pra indexar ") + typeName(a));
     double n = num(i, "[]");
@@ -340,13 +358,14 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
             }
             case OP_SET_INDEX: {
                 Value v = pop(), i = pop(), a = pop();
-                element(a, i) = std::move(v);
+                element(a, i, true) = std::move(v);
                 break;
             }
             case OP_GET_MEMBER: {
                 std::string m = name();
                 Value v = pop();
                 if (double* c = component(v, m)) st.push_back(Value(*c));
+                else if (auto s = std::get_if<std::shared_ptr<Struct>>(&v)) st.push_back(entry(**s, m, false));
                 else if (double* e = axis(v, m)) st.push_back(Value(*e));
                 else st.push_back(field(v, m));
                 break;
@@ -355,6 +374,7 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
                 std::string m = name();
                 Value x = pop(), v = pop();
                 if (double* c = component(v, m)) *c = num(x, "=");
+                else if (auto s = std::get_if<std::shared_ptr<Struct>>(&v)) entry(**s, m, true) = std::move(x);
                 else if (double* e = axis(v, m)) *e = num(x, "=");
                 else field(v, m) = std::move(x);
                 st.push_back(std::move(v));
@@ -386,6 +406,13 @@ Value VM::run(Instance& self, const Function& f, std::vector<Value> locals) {
                 withStack.push_back(me->shared_from_this());
                 me = inst.get();
                 withHold.push_back(std::move(inst));  // não deixa a instância sumir enquanto o bloco roda
+                break;
+            }
+            case OP_STRUCT: {
+                auto s = std::make_shared<Struct>();
+                auto kv = args(f.code[pc++] * 2);
+                for (size_t k = 0; k < kv.size(); k += 2) s->m[std::get<std::string>(kv[k])] = std::move(kv[k + 1]);
+                st.push_back(Value(std::move(s)));
                 break;
             }
             case OP_WITH_RESTORE:

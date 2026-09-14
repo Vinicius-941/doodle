@@ -199,6 +199,35 @@ void registerStdlib(VM& vm) {
         return Value(s);
     });
 
+    // --- structs: { chave: valor } ---
+    auto argStruct = [](std::vector<Value>& a, const char* fn) -> Struct& {
+        if (!a.empty())
+            if (auto p = std::get_if<std::shared_ptr<Struct>>(&a[0])) return **p;
+        throw std::runtime_error(std::string(fn) + ": esperava um struct");
+    };
+    vm.addNative("struct_exists", [argStruct](Instance&, std::vector<Value>& a) {
+        return Value(argStruct(a, "struct_exists").m.count(argStr(a, 1, "struct_exists")) > 0);
+    });
+    vm.addNative("struct_get", [argStruct](Instance&, std::vector<Value>& a) {  // nil se não existir
+        Struct& s = argStruct(a, "struct_get");
+        auto it = s.m.find(argStr(a, 1, "struct_get"));
+        return it == s.m.end() ? Value() : it->second;
+    });
+    vm.addNative("struct_set", [argStruct](Instance&, std::vector<Value>& a) {
+        if (a.size() < 3) throw std::runtime_error("struct_set espera (struct, chave, valor)");
+        argStruct(a, "struct_set").m[argStr(a, 1, "struct_set")] = a[2];
+        return Value();
+    });
+    vm.addNative("struct_remove", [argStruct](Instance&, std::vector<Value>& a) {
+        argStruct(a, "struct_remove").m.erase(argStr(a, 1, "struct_remove"));
+        return Value();
+    });
+    vm.addNative("struct_get_names", [argStruct](Instance&, std::vector<Value>& a) {  // as chaves, em ordem
+        auto nomes = std::make_shared<Array>();
+        for (auto& kv : argStruct(a, "struct_get_names").m) nomes->push_back(Value(kv.first));
+        return Value(nomes);
+    });
+
     // --- arrays: começam em 0, como na GML ---
     vm.addNative("array_length", [](Instance&, std::vector<Value>& a) {
         return Value((double)argArray(a, 0, "array_length")->size());

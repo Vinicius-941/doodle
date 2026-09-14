@@ -15,8 +15,8 @@ struct Token {
 };
 
 static std::vector<Token> lex(const std::string& s, const std::string& file) {
-    static const char* ops[] = {"==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "*=", "/=", "(", ")", "{", "}",
-                                "[", "]", ",", ".", ";", "+", "-", "*", "/", "%", "<", ">", "=", "!"};
+    static const char* ops[] = {"++", "--", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "*=", "/=", "(", ")", "{",
+                                "}", "[", "]", ",", ".", ";", "+", "-", "*", "/", "%", "<", ">", "=", "!", "?", ":"};
     std::vector<Token> out;
     int line = 1;
     size_t i = s.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;  // skip UTF-8 BOM
@@ -62,12 +62,12 @@ static std::vector<Token> lex(const std::string& s, const std::string& file) {
 
 // ---------- parser -> AST ----------
 
-enum class K { Lit, Name, Member, Index, Call, Array, Unary, Binary, Var, Assign, If, While, For, Return, Block, Expr, With };
+enum class K { Lit, Name, Member, Index, Call, Array, Unary, Binary, Var, Assign, If, While, For, Return, Block, Expr, With, Break, Continue, Ternary, Struct };
 
 // Generic AST node. kids layout per kind:
 //   Member: [obj] text=member   Index: [arr, i]   Call: [callee, args...]   Unary/Binary: operands, text=op
 //   Var: [init?] text=name   Assign: [target, value] text=op   If: [cond, then, else?]   While: [cond, body]
-//   For: [init|null, cond|null, step|null, body]   Return: [value?]   Block: stmts   Expr: [expr]   With: [alvo, body]
+//   For: [init|null, cond|null, step|null, body]   Return: [value?]   Block: stmts   Expr: [expr]   With: [alvo, body]   Ternary: [cond, sim, nao]   Struct: [chave, valor, chave, valor...]
 struct Node {
     K kind;
     int line;
@@ -164,6 +164,8 @@ struct Parser {
             n->kids.push_back(statement());
             return n;
         }
+        if (accept("break")) return node(K::Break);
+        if (accept("continue")) return node(K::Continue);
         if (accept("with")) {  // with (Inimigo) { hp -= 1 }: o bloco roda como cada um deles, como na GML
             auto n = node(K::With);
             expect("(");
@@ -187,7 +189,9 @@ struct Parser {
             if (accept("=")) n->kids.push_back(expr());
             return n;
         }
+        if (accept("++") || accept("--")) return increment(expr(), t[p - 1].text);  // ++i
         P e = expr();
+        if (accept("++") || accept("--")) return increment(std::move(e), t[p - 1].text);  // i++
         for (const char* op : {"=", "+=", "-=", "*=", "/="}) {
             if (!accept(op)) continue;
             if (e->kind != K::Name && e->kind != K::Index && e->kind != K::Member)
@@ -202,7 +206,28 @@ struct Parser {
         return n;
     }
 
-    P expr() { return binary(0); }
+    // i++ é i += 1 (só como comando: não vale dentro de uma expressão, como a[i++])
+    P increment(P alvo, const std::string& op) {
+        if (alvo->kind != K::Name && alvo->kind != K::Index && alvo->kind != K::Member)
+            throw err("só dá pra usar " + op + " em variável, elemento de array ou membro");
+        auto n = node(K::Assign, op == "++" ? "+=" : "-=");
+        auto um = node(K::Lit);
+        um->value = Value(1.0);
+        n->kids.push_back(std::move(alvo));
+        n->kids.push_back(std::move(um));
+        return n;
+    }
+
+    P expr() {  // cond ? sim : nao, com a menor precedência (e da direita para a esquerda)
+        P c = binary(0);
+        if (!accept("?")) return c;
+        auto n = node(K::Ternary);
+        n->kids.push_back(std::move(c));
+        n->kids.push_back(expr());
+        expect(":");
+        n->kids.push_back(expr());
+        return n;
+    }
 
     P binary(size_t level) {
         static const std::vector<std::vector<const char*>> levels = {
@@ -272,6 +297,21 @@ struct Parser {
             expect(")");
             return e;
         }
+        if (accept("{")) {  // { hp: 10, "nome completo": "Ana" }: só aparece onde cabe uma expressão
+            auto n = node(K::Struct);
+            if (!accept("}")) {
+                do {
+                    auto chave = node(K::Lit);
+                    if (t[p].kind != Token::Ident && t[p].kind != Token::Str) throw err("chave do struct: nome ou texto");
+                    chave->value = Value(t[p++].text);
+                    n->kids.push_back(std::move(chave));
+                    expect(":");
+                    n->kids.push_back(expr());
+                } while (accept(","));
+                expect("}");
+            }
+            return n;
+        }
         if (accept("[")) {
             auto n = node(K::Array);
             if (!accept("]")) {
@@ -308,6 +348,15 @@ struct Codegen {
     std::vector<std::pair<std::string, int>> scope;  // visible locals -> slot
     int line = 0;
     int withDepth = 0;  // > 0: dentro de with, onde campos e funções são de quem o bloco está rodando como
+    struct Laco {
+        std::vector<int> saidas, voltas;  // saltos de break e de continue, ajustados quando o laço termina
+        bool with = false;                // sair de um with precisa devolver quem estava rodando
+    };
+    std::vector<Laco> lacos;
+
+    void apontar(const std::vector<int>& saltos, int destino) {
+        for (int slot : saltos) f->code[slot] = destino;
+    }
 
     DooError err(const std::string& m) const { return DooError(chain[owner]->file + ":" + std::to_string(line) + ": " + m); }
     void emit(int x) { f->code.push_back(x); f->lines.push_back(line); }
@@ -353,6 +402,14 @@ struct Codegen {
         case K::Assign: assign(n); break;
         case K::Expr: expr(n->kids[0].get()); emit(OP_POP); break;
         case K::With: with(n); break;
+        case K::Break:
+        case K::Continue: {
+            if (lacos.empty()) throw err(std::string(n->kind == K::Break ? "break" : "continue") + " fora de um laço");
+            if (lacos.back().with) emit(OP_WITH_RESTORE);
+            int salto = jump(OP_JMP);
+            (n->kind == K::Break ? lacos.back().saidas : lacos.back().voltas).push_back(salto);
+            break;
+        }
         case K::If: {
             expr(n->kids[0].get());
             int jf = jump(OP_JF);
@@ -371,9 +428,14 @@ struct Codegen {
             int top = here();
             expr(n->kids[0].get());
             int jf = jump(OP_JF);
+            lacos.emplace_back();
             stmt(n->kids[1].get());
+            Laco l = std::move(lacos.back());
+            lacos.pop_back();
+            apontar(l.voltas, top);
             emit(OP_JMP, top);
             patch(jf);
+            apontar(l.saidas, here());
             break;
         }
         case K::For: {
@@ -381,10 +443,15 @@ struct Codegen {
             if (n->kids[0]) stmt(n->kids[0].get());
             int top = here(), jf = -1;
             if (n->kids[1]) { expr(n->kids[1].get()); jf = jump(OP_JF); }
+            lacos.emplace_back();
             stmt(n->kids[3].get());
+            Laco l = std::move(lacos.back());
+            lacos.pop_back();
+            apontar(l.voltas, here());  // continue ainda roda o passo (i += 1)
             if (n->kids[2]) stmt(n->kids[2].get());
             emit(OP_JMP, top);
             if (jf >= 0) patch(jf);
+            apontar(l.saidas, here());
             scope.resize(mark);
             break;
         }
@@ -416,18 +483,23 @@ struct Codegen {
         emit(OP_GET_LOCAL, i);
         emit(OP_INDEX);
         int pula = jump(OP_WITH_SELF);
+        lacos.push_back({{}, {}, true});
         withDepth++;
         stmt(n->kids[1].get());
         withDepth--;
+        Laco l = std::move(lacos.back());
+        lacos.pop_back();
         line = n->line;
         emit(OP_WITH_RESTORE);
         patch(pula);
+        apontar(l.voltas, here());  // continue: próximo alvo
         emit(OP_GET_LOCAL, i);
         emit(OP_CONST, constant(Value(1.0)));
         emit(OP_ADD);
         emit(OP_SET_LOCAL, i);
         emit(OP_JMP, topo);
         patch(fim);
+        apontar(l.saidas, here());
         scope.resize(mark);
     }
 
@@ -635,6 +707,20 @@ struct Codegen {
             break;
         }
         case K::Index: expr(n->kids[0].get()); expr(n->kids[1].get()); emit(OP_INDEX); break;
+        case K::Struct:
+            for (auto& k : n->kids) expr(k.get());
+            emit(OP_STRUCT, (int)n->kids.size() / 2);
+            break;
+        case K::Ternary: {
+            expr(n->kids[0].get());
+            int nao = jump(OP_JF);
+            expr(n->kids[1].get());
+            int fim = jump(OP_JMP);
+            patch(nao);
+            expr(n->kids[2].get());
+            patch(fim);
+            break;
+        }
         case K::Array:
             for (auto& k : n->kids) expr(k.get());
             emit(OP_ARRAY, (int)n->kids.size());

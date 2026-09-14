@@ -111,6 +111,85 @@ function derruba() {
 function perto() { return instance_nearest(10, 0, 0, Lacaio).x }
 function euMesmo() { return self == self && object_name(self) == "Chefe" }
 )"};
+// break, continue, ++/-- e o ternário, inclusive saindo de dentro de um with
+static const SourceFile lacoSrc = {"laco.doo", R"(
+object Laco
+function quebra() {
+    var s = 0
+    for (var i = 0; i < 100; i++) {
+        if (i == 5) { break }
+        if (i % 2 == 0) { continue }
+        s += i
+    }
+    var j = 10
+    while (true) {
+        j--
+        if (j < 7) { break }
+    }
+    return s * 100 + j
+}
+function incrementa() {
+    var a = [1, 2]
+    a[1]++
+    var v = vec3(0, 0, 0)
+    v.x++
+    var k = 0
+    ++k
+    --k
+    k++
+    return a[1] * 100 + v.x * 10 + k
+}
+function sinal(n) { return n > 0 ? "positivo" : n < 0 ? "negativo" : "zero" }
+function primeiroSo() {
+    var vistos = 0
+    with (Lacaio) {
+        vistos++
+        break
+    }
+    return vistos * 10 + (object_name(self) == "Laco" ? 1 : 0)
+}
+function pulaPrimeiro() {
+    var n = 0
+    var primeiro = true
+    with (Lacaio) {
+        if (primeiro) { primeiro = false continue }
+        n++
+    }
+    return n * 10 + (object_name(self) == "Laco" ? 1 : 0)
+}
+)"};
+
+// Structs (os dicionários da GML): literal, membro, [texto], compartilhados como array, e as struct_*
+static const SourceFile dicSrc = {"dic.doo", R"(
+object Dic
+function cria() {
+    var s = { hp: 10, "nome completo": "Ana", itens: [1, 2] }
+    s.hp -= 3
+    s["mana"] = 5
+    s.nivel = 2
+    array_push(s.itens, 3)
+    return s.hp * 1000 + s["mana"] * 100 + array_length(s.itens) * 10 + s.nivel
+}
+function funcoes() {
+    var s = {}
+    struct_set(s, "a", 1)
+    struct_set(s, "b", 2)
+    struct_remove(s, "a")
+    var nomes = struct_get_names(s)
+    return string(struct_exists(s, "a")) + string(struct_get(s, "zz")) + nomes[0] + array_length(nomes) + string(s)
+}
+function compartilhado() {
+    var a = { n: 1 }
+    var b = a
+    b.n = 9
+    return a.n + object_name(a)
+}
+function falta() {
+    var s = { a: 1 }
+    return s.b
+}
+)"};
+
 static const SourceFile lacaioSrc = {"lacaio.doo", R"(
 object Lacaio
 use SphereCollider
@@ -274,6 +353,13 @@ static int run() {
     for (int i = 0; i < 3; i++) tickAlarms(vm, alarmScene);
     CHECK(std::get<double>(*alvo->field("toques")) == 2);
 
+    auto dic = vm.instantiate(compileAll({dicSrc}, vm, false)[0]);
+    CHECK(std::get<double>(vm.call(*dic, "cria")) == 7 * 1000 + 5 * 100 + 3 * 10 + 2);
+    CHECK(std::get<std::string>(vm.call(*dic, "funcoes")) == "falsenilb1{b: 2}");
+    CHECK(std::get<std::string>(vm.call(*dic, "compartilhado")) == "9struct");  // b = a aponta para o mesmo
+    try { vm.call(*dic, "falta"); CHECK(false); }
+    catch (const DooError& e) { CHECK(std::string(e.what()).find("não tem 'b'") != std::string::npos); }
+
     auto birds = compileAll({birdSrc}, vm, false, {animalSrc});  // Animal comes from the library, like an SDK prefab
     CHECK(birds.size() == 2 && birds[0]->name == "Bird");
     auto bird = vm.instantiate(birds[0]);
@@ -336,7 +422,7 @@ static int run() {
     step(4);
     CHECK(std::get<bool>(uiField("b2", "clicked")) && !std::get<bool>(uiField("b1", "clicked")));
 
-    for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc, hillSrc, chefeSrc, lacaioSrc}, vm, false)) defs[d->name] = d;
+    for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc, hillSrc, chefeSrc, lacaioSrc, lacoSrc}, vm, false)) defs[d->name] = d;
     auto level = spawn("Level", {});
     CHECK(std::get<std::string>(vm.call(*level, "report")) == "Enemy 65 2");
 
@@ -349,6 +435,16 @@ static int run() {
     CHECK(std::get<double>(vm.call(*chefe, "derruba")) == 2);        // instance_destroy() dentro do with é do alvo
     CHECK(chefe->alive && std::get<bool>(vm.call(*chefe, "euMesmo")));
     CHECK(throws("object X\nfunction f() { with (X) { super.g() } }", vm, "x.doo:2:"));
+
+    auto laco = spawn("Laco", {});
+    CHECK(std::get<double>(vm.call(*laco, "quebra")) == (1 + 3) * 100 + 6);   // continue ainda roda o i++
+    CHECK(std::get<double>(vm.call(*laco, "incrementa")) == 3 * 100 + 1 * 10 + 1);
+    CHECK(std::get<std::string>(vm.call(*laco, "sinal", {Value(-2.0)})) == "negativo");
+    CHECK(std::get<std::string>(vm.call(*laco, "sinal", {Value(0.0)})) == "zero");
+    CHECK(std::get<double>(vm.call(*laco, "primeiroSo")) == 11);    // break no with devolve quem estava rodando
+    CHECK(std::get<double>(vm.call(*laco, "pulaPrimeiro")) == 11);  // 2 lacaios vivos, pulou 1
+    CHECK(throws("object X\nfunction f() {\n break }", vm, "x.doo:3:"));              // break fora de laço
+    CHECK(throws("object X\nfunction f() { var a = [1]\n var b = a[0++] }", vm, "x.doo:3:"));  // ++ só como comando
 
     auto ball = spawn("Ball", {0, 3, 0});
     auto ground = spawn("Floor", {0, -0.5, 0});

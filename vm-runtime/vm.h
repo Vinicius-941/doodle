@@ -1,6 +1,7 @@
 // Doo runtime: values, bytecode and the VM that executes it.
 #pragma once
 #include <functional>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -10,6 +11,7 @@
 
 struct Value;
 struct Instance;
+struct Struct;  // { hp: 10, nome: "x" } — o struct da GML
 using Array = std::vector<Value>;
 
 struct Vec3 {
@@ -27,9 +29,11 @@ struct Ref {
     bool operator==(const Ref& o) const { return !p.owner_before(o.p) && !o.p.owner_before(p); }
 };
 
-// nil | bool | number | string | array | vec3 | ref (arrays and refs are shared; vec3 is copied)
-using ValueBase = std::variant<std::monostate, bool, double, std::string, std::shared_ptr<Array>, Vec3, Ref>;
+// nil | bool | number | string | array | vec3 | ref | struct (arrays, refs e structs são compartilhados; vec3 é cópia)
+using ValueBase = std::variant<std::monostate, bool, double, std::string, std::shared_ptr<Array>, Vec3, Ref,
+                               std::shared_ptr<Struct>>;
 struct Value : ValueBase { using ValueBase::ValueBase; };
+struct Struct { std::map<std::string, Value> m; };  // chaves em ordem, para imprimir e listar sempre igual
 
 // Error already tagged with "file:line:" — thrown by the compiler and the VM.
 struct DooError : std::runtime_error { using runtime_error::runtime_error; };
@@ -47,6 +51,7 @@ enum Op : int {
     OP_SELF, OP_OTHER,             // ref para quem está rodando / para quem abriu o with
     OP_WITH_SELF,                  // pops ref e passa a rodar como ela; operand: para onde pular se ela já morreu
     OP_WITH_RESTORE,               // volta a rodar como quem estava antes do with
+    OP_STRUCT,                     // operand: n pares; pops [chave, valor] x n e pushes o struct
 };
 
 struct Function {

@@ -150,9 +150,14 @@ Ele aparece no menu de Jogos na próxima vez que o console ligar.
 | array | `[1, "a", vec3()]` | Compartilhado: duas variáveis podem apontar para o mesmo array |
 | vec3 | `vec3(1, 2, 3)` | Copiado ao atribuir (como um número) |
 | objeto | o que `instance_create` devolve | Referência gerenciada (`ref<Object>`) a uma instância |
+| struct | `{ hp: 10, "nome completo": "Ana" }` | O dicionário da GML. Compartilhado, como o array |
 
 **Verdadeiro/falso:** `nil`, `false` e `0` são falsos; uma referência a objeto destruído também. Todo o resto é
-verdadeiro (inclusive `""`, `[]` e `vec3()`).
+verdadeiro (inclusive `""`, `[]`, `{}` e `vec3()`).
+
+**Structs:** `s.hp` e `s["hp"]` leem e escrevem; escrever numa chave que não existe cria a chave, e ler uma
+que não existe é erro — confira antes com `struct_exists`, ou use `struct_get`, que devolve `nil`. Não dá
+para salvar um struct com `save_set`: salve os campos dele.
 
 ### 5.3 Variáveis e operadores
 
@@ -167,9 +172,11 @@ var nome = "Doo" + 2    // + com string concatena e converte: "Doo2"
 | Aritméticos | `+ - * / %` e o `-` unário |
 | Comparação | `== != < <= > >=` (strings comparam em ordem alfabética) |
 | Lógicos | `&& || !` (curto-circuito: devolvem o operando que decidiu) |
-| Atribuição | `= += -= *= /=` (é um comando, não uma expressão) |
+| Atribuição | `= += -= *= /=` e `++ --` (são comandos, não expressões) |
+| Condicional | `cond ? sim : nao` |
 
-`==` entre tipos diferentes é sempre falso (`1 == true` é falso). Não há `++`/`--`: use `i += 1`.
+`==` entre tipos diferentes é sempre falso (`1 == true` é falso). `i++` vale como comando (e no `for`), mas
+não dentro de uma expressão: `a[i++]` não compila.
 
 ### 5.4 Controle de fluxo
 
@@ -182,12 +189,16 @@ if (vida <= 0) {
 
 while (x < 10) { x += 1 }
 
-for (var i = 0; i < array_length(itens); i += 1) {
+for (var i = 0; i < array_length(itens); i++) {
+    if (itens[i] == nil) { continue }   // pula para o próximo (o i++ ainda roda)
+    if (itens[i] == "chave") { break }  // sai do laço
     show_debug_message(itens[i])
 }
+
+var texto = vida > 50 ? "bem" : "mal"
 ```
 
-Não há `break`/`continue`; use `return` dentro de uma função ou uma condição no laço.
+`break` e `continue` valem em `for`, `while` e `with`.
 
 ### 5.5 Funções
 
@@ -294,6 +305,15 @@ Tudo é função solta, com os nomes da GML — quem vem do GameMaker já sabe e
 | `array_length(a)` | |
 | `array_push(a, valor)` / `array_pop(a)` | Fim do array |
 | `array_insert(a, pos, valor)` / `array_delete(a, pos, quantidade = 1)` | |
+
+**Structs**
+
+| Função | Descrição |
+|---|---|
+| `struct_exists(s, chave)` | A chave existe |
+| `struct_get(s, chave)` | O valor, ou `nil` se não existir |
+| `struct_set(s, chave, valor)` / `struct_remove(s, chave)` | |
+| `struct_get_names(s)` | Array com as chaves, em ordem alfabética |
 
 **Outros**
 
@@ -768,6 +788,7 @@ hardware da Fase 3 (aperte **F3** para ver, ou rode com `--fps`).
 | Vozes de áudio | 24 ao mesmo tempo, como o PS1 | A mais antiga (fora as de loop e posicionais) cede o lugar |
 | Jogadores | 2 controles | O teclado conta como jogador 1 |
 | Recursão | 200 chamadas | Erro de execução |
+| Números | Um tipo só, ponto flutuante — como o `real` da GML | Não existe inteiro separado |
 
 O terreno vira uma grade de no máximo 65 × 65 (8 mil triângulos) e as malhas prontas são de baixa
 contagem, de propósito: esfera com 320 triângulos, cápsula com 672.
@@ -778,8 +799,6 @@ Isto não é escolha, é trabalho a fazer:
 
 | Área | Limite atual |
 |---|---|
-| Linguagem | Sem `break`/`continue`, `++`, operador ternário, dicionários |
-| Números | Um tipo só, ponto flutuante, como o `real` da GML (sem inteiro separado) |
 | Física | Colisores sem rotação; sem massa (dois `Rigidbody` se empurram por igual); qualquer rampa de terreno é caminhável |
 | Render | Sem sombras; câmera só em perspectiva; modelos sem animação; terreno com uma textura só |
 | Áudio | Só WAV PCM; som posicional só no volume (sem esquerda/direita) |
