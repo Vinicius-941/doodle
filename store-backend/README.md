@@ -18,12 +18,27 @@ publicar com o código, use `publicar.ps1 -Fonte`. O segundo põe a pasta no ar.
 
 O endereço fica salvo em `saves/sistema.sav`, na chave `loja`, e o padrão é `http://localhost:8080`.
 
+## Assinatura
+
+Crie o par de chaves uma vez:
+
+```powershell
+build\Release\doodle.exe --keygen store-backend\chave.priv loja.pub
+```
+
+A partir daí o `publicar.ps1` assina cada jogo (`jogo.sig` junto do `jogo.doobc`). O `loja.pub` fica na
+raiz do console, e ele passa a **recusar** pacote que não bata com essa chave — adulterado no caminho ou
+vindo de outra loja. Sem `loja.pub`, o console instala sem conferir.
+
+A chave privada não entra no controle de versão (está no `.gitignore`). Perdeu, gera outro par e distribui
+o `loja.pub` novo.
+
 ## O que o console pede
 
 | Pedido | Resposta |
 |---|---|
 | `GET /catalogo.txt` | A lista de jogos (formato abaixo) |
-| `GET /<id>/<arquivo>` | Cada arquivo do jogo, como está em `games/<id>/` |
+| `GET /<id>/<arquivo>` | Cada arquivo do jogo: `jogo.doobc`, `jogo.sig` e os recursos |
 
 ## Formato do catálogo
 

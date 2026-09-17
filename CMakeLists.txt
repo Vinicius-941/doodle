@@ -18,8 +18,8 @@ target_link_libraries(sdk PUBLIC doo)
 
 # Simulator: virtual Doodle hardware on Windows. Reads firmware/ and games/ from the source tree,
 # so editing a .doo only needs a relaunch from the menu, not a rebuild.
-add_executable(doodle simulator/main.cpp simulator/net.cpp)
-target_link_libraries(doodle PRIVATE sdk opengl32 glu32 xaudio2 xinput windowscodecs ole32 winhttp mfplat mfreadwrite mfuuid)
+add_executable(doodle simulator/main.cpp simulator/net.cpp simulator/assinatura.cpp)
+target_link_libraries(doodle PRIVATE sdk opengl32 glu32 xaudio2 xinput windowscodecs ole32 winhttp mfplat mfreadwrite mfuuid bcrypt)
 target_compile_definitions(doodle PRIVATE DOODLE_ROOT="${CMAKE_SOURCE_DIR}" UNICODE _UNICODE NOMINMAX)
 
 enable_testing()

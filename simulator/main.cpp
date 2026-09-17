@@ -31,6 +31,7 @@
 #include <thread>
 #include <tuple>
 #include <unordered_map>
+#include "assinatura.h"
 #include "bytecode.h"
 #include "compiler.h"
 #include "net.h"
@@ -1006,6 +1007,19 @@ static void installGame(const std::string& id) {
         done += (long long)data.size();
         storeProgress = item.size > 0 ? std::min(1.0, double(done) / item.size) : 0.5;
     }
+    std::error_code chaveEc;
+    fs::path chavePublica = root / "loja.pub";
+    if (fs::exists(chavePublica, chaveEc)) {  // console com chave: pacote precisa vir assinado pela loja
+        fs::path jogo = tmp / "jogo.doobc", sig = tmp / "jogo.sig";
+        if (!fs::exists(jogo, chaveEc) || !fs::exists(sig, chaveEc)) {
+            fs::remove_all(tmp, ec);
+            throw std::runtime_error("este console só instala jogo compilado e assinado pela loja");
+        }
+        if (!assinatura::confere(readFile(jogo), readFile(sig), readFile(chavePublica))) {
+            fs::remove_all(tmp, ec);
+            throw std::runtime_error("a assinatura do jogo não confere: pacote adulterado ou de outra loja");
+        }
+    }
     if (!isGame(tmp)) {
         fs::remove_all(tmp, ec);
         throw std::runtime_error("pacote sem main.doo nem jogo.doobc");
@@ -1849,15 +1863,55 @@ static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 
 int main(int argc, char** argv) {
     bool check = false, console = false;
-    std::string buildDir, buildOut;
+    std::string buildDir, buildOut, cripto, cripto1, cripto2, cripto3;
     root = fs::u8path(DOODLE_ROOT);
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--check") check = true;
         else if (arg == "--build" && i + 2 < argc) { buildDir = argv[++i]; buildOut = argv[++i]; }  // jogo -> .doobc
+        else if (arg == "--keygen" && i + 2 < argc) { cripto = "keygen"; cripto1 = argv[++i]; cripto2 = argv[++i]; }
+        else if (arg == "--sign" && i + 3 < argc) {  // (arquivo, chave privada, saída .sig)
+            cripto = "sign";
+            cripto1 = argv[++i];
+            cripto2 = argv[++i];
+            cripto3 = argv[++i];
+        } else if (arg == "--verify" && i + 3 < argc) {  // (arquivo, .sig, chave pública)
+            cripto = "verify";
+            cripto1 = argv[++i];
+            cripto2 = argv[++i];
+            cripto3 = argv[++i];
+        }
         else if (arg == "--console") console = true;          // liga direto em tela cheia
         else if (arg == "--fps") showFps = fpsLog = true;     // contador na tela e uma linha por segundo no console
         else root = arg;
+    }
+    if (!cripto.empty()) {
+        try {
+            auto grava = [](const std::string& caminho, const std::string& dados) {
+                std::ofstream out(fs::u8path(caminho), std::ios::binary);
+                out.write(dados.data(), (std::streamsize)dados.size());
+                if (!out) throw std::runtime_error("não consegui escrever " + caminho);
+            };
+            if (cripto == "keygen") {
+                std::string priv, pub;
+                assinatura::gerar(priv, pub);
+                grava(cripto1, priv);
+                grava(cripto2, pub);
+                printf("ok    chaves em %s (guarde fora do repositório) e %s\n", cripto1.c_str(), cripto2.c_str());
+            } else if (cripto == "sign") {
+                grava(cripto3, assinatura::assinar(readFile(fs::u8path(cripto1)), readFile(fs::u8path(cripto2))));
+                printf("ok    %s assinado em %s\n", cripto1.c_str(), cripto3.c_str());
+            } else {
+                bool ok = assinatura::confere(readFile(fs::u8path(cripto1)), readFile(fs::u8path(cripto2)),
+                                              readFile(fs::u8path(cripto3)));
+                printf("%s %s\n", ok ? "ok   " : "ERRO ", ok ? "a assinatura confere" : "a assinatura NÃO confere");
+                return ok ? 0 : 1;
+            }
+            return 0;
+        } catch (const std::exception& e) {
+            printf("ERRO  %s\n", e.what());
+            return 1;
+        }
     }
     registerSdk();
     if (check) return checkAll();

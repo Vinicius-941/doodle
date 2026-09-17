@@ -57,6 +57,9 @@ build\Release\doodle.exe
 | `build\Release\doodle.exe --fps` | Liga com o contador de quadros e escreve uma linha por segundo no terminal |
 | `build\Release\doodle.exe --check` | Só compila o firmware e todos os jogos e mostra os erros |
 | `build\Release\doodle.exe --build games/meu-jogo jogo.doobc` | Compila um jogo para bytecode, para distribuir sem o código (seção 3) |
+| `... --keygen chave.priv loja.pub` | Cria o par de chaves da sua loja (uma vez) |
+| `... --sign jogo.doobc chave.priv jogo.sig` | Assina um jogo compilado |
+| `... --verify jogo.doobc jogo.sig loja.pub` | Confere uma assinatura (0 = confere) |
 | `ctest --test-dir build -C Release` | Testes do compilador, da VM, da física e dos prefabs |
 
 Os `.doo` são compilados na hora em que o programa abre: depois de editar um jogo, basta abri-lo de novo
@@ -851,6 +854,11 @@ menu estilo XMB, com as categorias Configurações, Jogos e Loja. Só ele pode u
 As configurações do firmware (volume, tema e o endereço da loja, na chave `loja`) ficam em
 `saves/sistema.sav`.
 
+**Assinatura:** se existir um arquivo `loja.pub` na raiz do console, ele **só instala jogo compilado e
+assinado** por essa chave — pacote adulterado no caminho, ou vindo de outra loja, é recusado na hora, antes
+de gravar. Sem `loja.pub`, instala sem conferir (modo caseiro). A chave privada fica com quem publica e
+nunca vai para o console. É ECDSA P-256, do próprio Windows.
+
 **A loja** é um servidor de arquivos estáticos: `GET /catalogo.txt` lista os jogos e `GET /<id>/<arquivo>`
 baixa cada um. Ver [store-backend/README.md](../store-backend/README.md) para o formato e para publicar.
 Baixar não pode travar o quadro, então roda numa thread do simulador: `store_install(id)` volta na hora e o
@@ -919,4 +927,4 @@ Isto não é escolha, é trabalho a fazer:
 | Render | Terreno com duas texturas no máximo |
 | Áudio | Sem streaming: o som é decodificado inteiro na memória, então música longa pesa na memória; esquerda/direita só em saída estéreo |
 | Controle | O teclado do PC vale só como jogador 1 |
-| Loja | Servidor de arquivos estáticos: sem conta, sem pagamento e sem assinatura do pacote |
+| Loja | Servidor de arquivos estáticos: sem conta e sem pagamento (o pacote já vai assinado) |

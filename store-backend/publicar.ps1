@@ -4,6 +4,11 @@
 #   .\store-backend\publicar.ps1 quadrado         publica só um
 #   .\store-backend\publicar.ps1 -Fonte           publica com os .doo em vez do jogo.doobc
 #
+# Com store-backend\chave.priv presente, cada jogo sai assinado (jogo.sig). Crie o par uma vez com:
+#   build\Release\doodle.exe --keygen store-backend\chave.priv loja.pub
+# A chave privada fica fora do controle de versão; a pública (loja.pub) vai na raiz do console, e a partir
+# daí ele só instala jogo assinado por ela.
+#
 # Compilar usa build\Release\doodle.exe --build, então compile o simulador antes.
 # Depois é só servir a pasta como arquivo estático:
 #   python -m http.server 8080 --directory store-backend\loja
@@ -13,6 +18,7 @@ $raiz = Split-Path -Parent $PSScriptRoot
 $origem = Join-Path $raiz "games"
 $destino = Join-Path $PSScriptRoot "loja"
 $doodle = Join-Path $raiz "build\Release\doodle.exe"
+$chave = Join-Path $PSScriptRoot "chave.priv"
 if (-not $Fonte -and -not (Test-Path $doodle)) { throw "compile o simulador antes (falta $doodle), ou publique com -Fonte" }
 
 if (-not $jogos) {
@@ -35,6 +41,10 @@ foreach ($id in $jogos) {
     if (-not $Fonte) {   # o jogo vai compilado: sai o código, entra o jogo.doobc
         $saida = & $doodle --build "games/$id" (Join-Path $alvo "jogo.doobc")
         if ($LASTEXITCODE -ne 0) { throw "não compilou $id`n$saida" }
+        if (Test-Path $chave) {   # e assinado, se houver chave privada
+            $saida = & $doodle --sign (Join-Path $alvo "jogo.doobc") $chave (Join-Path $alvo "jogo.sig")
+            if ($LASTEXITCODE -ne 0) { throw "não assinou $id`n$saida" }
+        }
         # extensão exata: o -Filter *.doo do Windows também pega jogo.doobc (pelo nome curto 8.3)
         Get-ChildItem $alvo -Recurse -File | Where-Object { $_.Extension -eq '.doo' } | Remove-Item
     }
