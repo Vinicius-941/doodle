@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
   add_compile_options(/utf-8 /W3)
+  # runtime do Visual C++ dentro do .exe: o console roda em maquina sem nada instalado
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 # Doo language: compiler + VM (no platform code; this is what gets ported in Phase 3)

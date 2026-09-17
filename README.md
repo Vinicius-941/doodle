@@ -45,6 +45,16 @@ usado na configuração do CMake.
 | `tests/` | Testes do compilador, runtime e SDK |
 | `docs/` | Manual da linguagem e do SDK |
 
+## Entregar o console
+
+```powershell
+.\scripts\empacotar.ps1
+```
+
+Monta `dist\Doodle` (e `dist\Doodle.zip`) com o executável, o firmware, os prefabs e os jogos compilados.
+Quem receber é só abrir o `doodle.exe` de dentro da pasta: não precisa instalar nada. O console lê o que
+está ao lado do executável, então dá para levar a pasta em pendrive.
+
 ## Loja
 
 A loja é um servidor de arquivos estáticos — sem framework, sem banco, sem login. Para pôr no ar:

@@ -61,9 +61,17 @@ build\Release\doodle.exe
 | `... --sign jogo.doobc chave.priv jogo.sig` | Assina um jogo compilado |
 | `... --verify jogo.doobc jogo.sig loja.pub` | Confere uma assinatura (0 = confere) |
 | `ctest --test-dir build -C Release` | Testes do compilador, da VM, da física e dos prefabs |
+| `.\scripts\empacotar.ps1` | Monta `dist\Doodle` e `dist\Doodle.zip`: o console pronto para entregar |
 
 Os `.doo` são compilados na hora em que o programa abre: depois de editar um jogo, basta abri-lo de novo
 pelo menu, sem recompilar o simulador.
+
+**Entregar o console para alguém:** `.\scripts\empacotar.ps1` monta uma pasta com o `doodle.exe`, o
+firmware, os prefabs e os jogos já compilados, e zipa. Basta abrir o `doodle.exe` de dentro dela — não
+precisa instalar nada, nem o runtime do Visual C++, que vai dentro do executável. O console lê firmware,
+prefabs e jogos **da pasta onde o executável está**; rodando de `build\Release`, ele usa a pasta do
+projeto, que é o que serve enquanto se desenvolve. Com `-Fonte`, o pacote leva os `.doo` em vez do
+compilado.
 
 **Controle** (teclado ou controle XInput):
 

@@ -1836,6 +1836,19 @@ static void setFullscreen(HWND hwnd, bool on) {
     ShowCursor(!on);  // so nas transicoes, para o contador do ShowCursor nao desandar
 }
 
+// De onde o console lê firmware, prefabs e jogos: a pasta do próprio .exe quando ela tem um firmware
+// (console instalado ou o zip aberto em qualquer lugar); senão, a pasta do projeto gravada na compilação,
+// que é o que serve durante o desenvolvimento.
+static fs::path raizPadrao() {
+    wchar_t caminho[MAX_PATH] = {};
+    if (GetModuleFileNameW(nullptr, caminho, MAX_PATH)) {
+        fs::path aoLado = fs::path(caminho).parent_path();
+        std::error_code ec;
+        if (fs::exists(aoLado / "firmware" / "main.doo", ec)) return aoLado;
+    }
+    return fs::u8path(DOODLE_ROOT);
+}
+
 static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
     switch (msg) {
     case WM_SYSKEYDOWN:
@@ -1864,7 +1877,7 @@ static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 int main(int argc, char** argv) {
     bool check = false, console = false;
     std::string buildDir, buildOut, cripto, cripto1, cripto2, cripto3;
-    root = fs::u8path(DOODLE_ROOT);
+    root = raizPadrao();
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--check") check = true;

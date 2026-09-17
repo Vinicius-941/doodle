@@ -4,3 +4,4 @@ store-backend/loja/
 games/*/.loja
 store-backend/chave.priv
 loja.pub
+dist/
