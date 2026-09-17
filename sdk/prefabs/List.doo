@@ -46,7 +46,9 @@ function paint(focused, t) {
             if (focused) { a = 0.55 + 0.15 * sin(t * 5) }
             draw_rectangle(x, ly, w, row, accent, a * alpha)
         }
-        draw_text(x + 4, ly + (row - size) / 2, items[j], size, color, alpha)
+        var espaco = w - 8
+        if (n > rows()) { espaco = w - 14 }   // deixa passar a barra de rolagem
+        draw_text(x + 4, ly + (row - size) / 2, string_shorten(items[j], espaco, size), size, color, alpha)
     }
     if (n > rows()) {   // barra de rolagem
         var alturaBarra = max(4, h * rows() / n)

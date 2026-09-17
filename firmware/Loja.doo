@@ -33,6 +33,7 @@ function abrir() {
     canvas.active = false   // o A que abriu a loja ainda está apertado: espera soltar
     canvas.tint(xmb.corTema())
     canvas.focus_on(lista)
+    busca.value = ""   // abrir a loja mostra a loja inteira, não a busca da vez passada
     atualizar()
 }
 

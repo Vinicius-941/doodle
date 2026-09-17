@@ -70,6 +70,9 @@ function paint(focused, t) {
         texto = placeholder
         a = 0.5 * alpha
     }
+    var espaco = w - 8                       // texto comprido não passa por cima do rótulo
+    if (label != "") { espaco = w - 12 - string_width(label, size) }
+    texto = string_shorten(texto, espaco, size)
     draw_text(x + w - 4 - string_width(texto, size), y + (h - size) / 2, texto, size, color, a)
     if (typing) { teclado() }
 }
@@ -83,6 +86,9 @@ function teclado() {
     draw_rectangle(px, py, largura, altura, 0x12141A, 0.97)
     var mostrado = value
     if (mostrado == "") { mostrado = "_" }
+    while (string_width(mostrado, 11) > largura - 8 && string_length(mostrado) > 1) {
+        mostrado = string_copy(mostrado, 2, string_length(mostrado) - 1)   // texto comprido: mostra o fim,
+    }                                                                      // que é onde as letras entram
     draw_text(px + 4, py + 4, mostrado, 11, 0xFFFFFF)
     for (var linha = 0; linha < array_length(teclas); linha += 1) {
         for (var col = 0; col < string_length(teclas[linha]); col += 1) {

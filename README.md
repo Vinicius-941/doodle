@@ -26,7 +26,11 @@ inteiro de vezes, sem suavizar. Use `--console` para abrir direto em tela cheia
 (F11 ou Alt+Enter alterna a qualquer momento) e `--fps` para ligar os
 contadores de quadro e de orçamento, que F3 também mostra e esconde.
 
-O simulador abre o firmware, que permite selecionar os jogos disponíveis.
+O simulador abre o firmware: um menu no estilo XMB com três colunas — Configurações,
+Jogos e Loja — e quatro telas de aplicativo em tela cheia: a loja, as configurações
+(volume, tema, endereço da loja e controles), a ficha do jogo (**Y** na lista: capa,
+espaço em disco, dados salvos, apagar save e desinstalar) e a tabela de controles.
+O tema escolhido vale em todas as telas, e "Desligar o console" fecha o console.
 Os arquivos `.doo` são compilados ao carregar o programa; editar um jogo não
 exige recompilar o simulador. Mantenha as pastas de código e recursos no local
 usado na configuração do CMake.
@@ -38,7 +42,7 @@ usado na configuração do CMake.
 | `doo-compiler/` | Compilador da linguagem Doo |
 | `vm-runtime/` | Máquina virtual e execução do bytecode |
 | `simulator/` | Simulador Windows: renderização OpenGL, input e áudio |
-| `firmware/` | Boot e menu do console, escritos em Doo |
+| `firmware/` | Boot, menu e as telas do console, escritos em Doo |
 | `sdk/` | Física, modelos, áudio, saves e prefabs em Doo |
 | `games/` | Jogos: Quadrado, teste 3D e DooCraft |
 | `store-backend/` | Loja digital: servidor estático e script de publicação |

@@ -53,6 +53,9 @@ Para ligar, e so abrir doodle.exe. Nao precisa instalar nada.
 
   F11 ou Alt+Enter: tela cheia       F3: contadores de desempenho
 
+A lista de botoes tambem esta no console, em Configuracoes > Controles.
+Para fechar o console, use "Desligar o console", na coluna Configuracoes.
+
 A tela do console tem 320 x 180 pixels e roda a 60 quadros por segundo.
 Os jogos ficam em games\, um por pasta; os saves, em saves\.
 A loja procura o servidor gravado em saves\sistema.sav (padrao http://localhost:8080).

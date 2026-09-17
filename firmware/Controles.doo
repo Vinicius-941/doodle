@@ -38,8 +38,8 @@ function draw() {
     par(166, 54, "Analógico direito", "I J K L")
     par(166, 84, "Gatilhos", "E e R")
 
-    draw_text(166, 118, "Com um controle de Xbox", 9, 0x7BD36B, 0.9)
-    draw_text(166, 128, "plugado, tudo vem dele.", 9, 0x7BD36B, 0.9)
+    draw_text(166, 118, "Com um controle de Xbox", 9, 0xFFFFFF, 0.85)
+    draw_text(166, 128, "plugado, tudo vem dele.", 9, 0xFFFFFF, 0.85)
     draw_text(166, 146, "Dois jogadores: o segundo", 9, 0xD8DCE4, 0.8)
     draw_text(166, 156, "joga só no controle.", 9, 0xD8DCE4, 0.8)
 

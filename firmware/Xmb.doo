@@ -271,7 +271,7 @@ function item(c, i, y, on) {
         if (!draw_sprite("games/" + jogos[i] + "/icon.png", col - 20, y - h / 2, w, h, a)) {
             draw_rectangle(col - 20, y - h / 2, w, h, 0x607090, a)
         }
-        draw_text(col + 46, y - 9, titulos[i], 11, 0xFFFFFF, a)
+        draw_text(col + 46, y - 9, string_shorten(titulos[i], 182, 11), 11, 0xFFFFFF, a)
         if (on) {
             var info = "Sem dados salvos"
             if (game_save_data(jogos[i]) != "") { info = "Dados salvos" }
