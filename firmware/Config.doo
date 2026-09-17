@@ -1,0 +1,84 @@
+object Config
+
+// Configurações como aplicativo: volume, tema, endereço da loja (pelo teclado da tela) e a tela "sobre".
+// O XMB abre e sai de cena, do mesmo jeito que na loja.
+
+var xmb
+var aberta = false
+var canvas
+var sVolume
+var bTema
+var cLoja
+var temaNomes = ["Azul", "Verde", "Roxo", "Laranja", "Grafite"]
+var urlSalva = ""    // último endereço guardado, para saber quando mudou de verdade
+
+function create() {
+    canvas = instance_create(Canvas)
+    canvas.visible = false
+    canvas.active = false
+    sVolume = canvas.slider("Volume", 20, 34, 280, 0, 100, save_get("volume", 80))
+    bTema = canvas.button("Tema", 20, 60, 280, 18)
+    cLoja = canvas.field("Loja", 20, 86, 280, save_get("loja", "http://localhost:8080"))
+    cLoja.max = 60
+    urlSalva = cLoja.value
+}
+
+function abrir() {
+    aberta = true
+    canvas.visible = true
+    canvas.active = false   // espera soltar o A que abriu
+    canvas.focus_on(sVolume)
+}
+
+function fechar() {
+    aberta = false
+    canvas.visible = false
+    canvas.active = false
+    if (xmb) { xmb.voltar() }
+}
+
+function step() {
+    if (!aberta) { return }
+    if (!canvas.active && !button_check(btn_a)) { canvas.active = true }
+    bTema.text = "Tema: " + temaNomes[xmb.tema]
+    if (sVolume.changed) {
+        xmb.volume = sVolume.value
+        system_volume(sVolume.value / 100)
+        save_set("volume", sVolume.value)
+    }
+    if (bTema.clicked) {
+        xmb.tema = (xmb.tema + 1) % array_length(temaNomes)
+        save_set("tema", xmb.tema)
+        audio_play_tone(660, 40)
+    }
+    if (!cLoja.holding() && cLoja.value != urlSalva) {   // fechou o teclado com um endereço novo
+        urlSalva = cLoja.value
+        store_set_url(urlSalva)
+        save_set("loja", urlSalva)
+        audio_play_tone(880, 60)
+    }
+    if (button_check_pressed(btn_b) && !cLoja.holding()) { fechar() }
+}
+
+function draw() {
+    if (!aberta) { return }
+    draw_gradient(0, 0, 320, 180, 0x101A2C, 0x1B2A44)
+    draw_rectangle(0, 0, 320, 14, 0x2A3E68)
+    draw_text(6, 2, "CONFIGURAÇÕES", 10, 0xFFFFFF)
+    draw_text(314 - string_width("Doodle 0.1", 9), 3, "Doodle 0.1", 9, 0xC8D8FF)
+
+    draw_text(20, 112, "Sobre o console", 10, 0xFFFFFF)
+    draw_text(20, 126, "Tela 320 x 180 (16:9) a 60 quadros por segundo", 9, 0xC8D8FF, 0.9)
+    draw_text(20, 138, array_length(game_list()) + " jogos instalados   " + estadoLoja(), 9, 0xC8D8FF, 0.9)
+    draw_text(20, 150, "Linguagem Doo, no formato da GML", 9, 0xC8D8FF, 0.9)
+
+    var dica = "A altera   Esq/Dir ajusta   B volta"
+    if (cLoja.holding()) { dica = "Escrevendo o endereço da loja" }
+    draw_text(6, 167, dica, 9, 0xFFFFFF, 0.75)
+}
+
+function estadoLoja() {
+    if (store_error() != "") { return "loja: sem resposta" }
+    if (store_ready()) { return "loja no ar" }
+    return "loja não consultada"
+}

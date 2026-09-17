@@ -23,9 +23,9 @@ var temaNomes = ["Azul", "Verde", "Roxo", "Laranja", "Grafite"]
 var temaCores = [0x2A5BD7, 0x2E9A5A, 0x7A3FC0, 0xD0702A, 0x5A6070]
 
 var loja             // o aplicativo da loja (Loja.doo), criado na primeira vez que abre
+var config           // o aplicativo de configurações (Config.doo)
 
-var modo = ""        // "" navegando | "editar" (ajustando uma configuração) | "painel" | "opcoes"
-var painel = []      // linhas do painel de informação aberto
+var modo = ""        // "" navegando | "opcoes" (menu do jogo)
 var opcao = 0        // linha escolhida no menu de opções do jogo
 var opcoesNomes = ["Iniciar", "Apagar dados salvos", "Cancelar"]
 
@@ -41,17 +41,10 @@ function create() {
 function step() {
     var dt = delta_time
     t += dt
-    if (loja && loja.aberta) { return }   // a loja está no ar: o menu sai de cena
+    if (aplicativoAberto()) { return }   // loja ou configurações no ar: o menu sai de cena
     fade = min(1, fade + dt * 1.6)
     if (fade == 1) {   // sem entrada durante a transição do boot
-        if (modo == "editar") {
-            editar()
-        } else if (modo == "painel") {
-            if (button_check_pressed(btn_a) || button_check_pressed(btn_b)) {
-                modo = ""
-                audio_play_tone(520, 50)
-            }
-        } else if (modo == "opcoes") {
+        if (modo == "opcoes") {
             opcoes()
         } else {
             navegar()
@@ -105,12 +98,20 @@ function navegar() {
     }
 }
 
+function aplicativoAberto() {
+    if (loja && loja.aberta) { return true }
+    if (config && config.aberta) { return true }
+    return false
+}
+
 function abrir(c, i) {
-    if (c == 0 && i < 2) {
-        modo = "editar"
-        audio_play_tone(880, 50)
-    } else if (c == 0) {
-        mostrar(["Doodle", "Firmware 0.1 - linguagem Doo", "Tela 320 x 180 (16:9) a 60 quadros", "Simulador para Windows"])
+    if (c == 0) {
+        if (!config) {
+            config = instance_create(Config)
+            config.xmb = self
+        }
+        config.abrir()
+        audio_play_tone(880, 60)
     } else if (c == 1) {
         if (array_length(jogos) > 0) {
             iniciar(jogos[i])
@@ -122,27 +123,6 @@ function abrir(c, i) {
         }
         loja.abrir()
         audio_play_tone(880, 60)
-    }
-}
-
-function editar() {
-    var d = 0
-    if (button_check_pressed(btn_right)) { d = 1 }
-    if (button_check_pressed(btn_left)) { d = -1 }
-    if (d != 0) {
-        if (sel[0] == 0) {
-            volume = max(0, min(100, volume + d * 10))
-            system_volume(volume / 100)
-        } else {
-            tema = (tema + d + array_length(temaNomes)) % array_length(temaNomes)
-        }
-        tique()
-    }
-    if (button_check_pressed(btn_a) || button_check_pressed(btn_b)) {
-        save_set("volume", volume)
-        save_set("tema", tema)
-        modo = ""
-        audio_play_tone(520, 50)
     }
 }
 
@@ -182,12 +162,6 @@ function iniciar(id) {
     system_launch(id)
 }
 
-function mostrar(linhas) {
-    painel = linhas
-    modo = "painel"
-    audio_play_tone(880, 50)
-}
-
 function cortar(s, largura, tam) {   // encurta até caber, com reticências
     if (string_width(s, tam) <= largura) { return s }
     while (string_length(s) > 4 && string_width(s + "...", tam) > largura) {
@@ -203,26 +177,24 @@ function tique() {
 // ---------- itens ----------
 
 function contar(c) {
-    if (c == 0) { return 3 }
+    if (c == 0) { return 1 }
     if (c == 1) { return max(1, array_length(jogos)) }
     return 1
 }
 
 function rotulo(c, i) {
-    if (c == 0) { return ["Volume", "Tema", "Sobre o Doodle"][i] }
+    if (c == 0) { return "Abrir configurações" }
     if (c == 1) { return "Nenhum jogo instalado" }
     return "Abrir a loja"
 }
 
 function valor(c, i) {
-    if (c == 0 && i == 0) { return volume + "%" }
-    if (c == 0 && i == 1) { return temaNomes[tema] }
+    if (c == 0) { return volume + "%  " + temaNomes[tema] }
     return ""
 }
 
 function dica(c, i) {
-    if (c == 0 && i < 2) { return "A: ajustar" }
-    if (c == 0) { return "Versão do sistema" }
+    if (c == 0) { return "Volume, tema, loja e sobre" }
     if (c == 1) { return "Ponha jogos em games/" }
     return "Baixar jogos novos"
 }
@@ -230,7 +202,7 @@ function dica(c, i) {
 // ---------- desenho ----------
 
 function draw() {
-    if (loja && loja.aberta) { return }   // quem desenha agora é a loja
+    if (aplicativoAberto()) { return }   // quem desenha agora é a loja ou as configurações
     fundo()
 
     var hora = clock_date() + "  " + clock_time()
@@ -259,15 +231,6 @@ function draw() {
         }
     }
 
-    if (modo == "painel") {
-        draw_rectangle(0, 0, 320, 180, 0x000000, 0.88)
-        for (var i = 0; i < array_length(painel); i += 1) {
-            var tam = 10
-            if (i == 0) { tam = 16 }
-            centrado(160, 42 + i * 20, painel[i], tam, 1)
-        }
-        centrado(160, 158, "A ou B: voltar", 10, 0.8)
-    }
     if (modo == "opcoes") {   // menu lateral, como o do triângulo no PS3
         draw_rectangle(0, 0, 320, 180, 0x000000, 0.4)
         draw_rectangle(188, 0, 132, 180, 0x0A1020, 0.9)
@@ -281,9 +244,8 @@ function draw() {
 
     var dicas = "A: abrir    Esq/Dir: muda"
     if (cat == 1) { dicas = "A: jogar    Y: opções" }
-    if (modo == "editar") { dicas = "Esq/Dir: ajusta    A: ok" }
     if (modo == "opcoes") { dicas = "A: confirmar    B: voltar" }
-    if (modo != "painel") { draw_text(12, 166, dicas, 10, 0xFFFFFF, 0.75) }
+    draw_text(12, 166, dicas, 10, 0xFFFFFF, 0.8)
 
     if (fade < 1) {   // sai do preto do boot
         draw_rectangle(0, 0, 320, 180, 0x000000, 1 - fade)
@@ -310,7 +272,7 @@ function item(c, i, y, on) {
         if (on) {
             var info = "Sem dados salvos"
             if (game_save_data(jogos[i]) != "") { info = "Dados salvos" }
-            draw_text(col + 46, y + 4, info, 9, 0xE0E8FF, 0.85)
+            draw_text(col + 46, y + 4, info, 9, 0xE0E8FF, 0.9)
         }
         return
     }
@@ -318,11 +280,10 @@ function item(c, i, y, on) {
     draw_text(col + 16, y - 9, rotulo(c, i), 11, 0xFFFFFF, a)
     var v = valor(c, i)
     if (v != "" && y > row) {   // itens acima das categorias mostram só o nome
-        if (on && modo == "editar") { v = "<  " + v + "  >" }
         draw_text(302 - string_width(v, 10), y - 8, v, 10, 0xFFFFFF, a)
     }
     if (on) {
-        draw_text(col + 16, y + 3, dica(c, i), 9, 0xE0E8FF, 0.85)
+        draw_text(col + 16, y + 3, dica(c, i), 9, 0xE0E8FF, 0.9)
     }
 }
 

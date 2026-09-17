@@ -138,10 +138,10 @@ function draw() {
     var estado = cabecalho()
     draw_text(314 - string_width(estado, 9), 3, estado, 9, 0xC8D8FF)
     detalhes()
-    var dica = "A: instalar ou abrir    X: atualizar    Y: desinstalar    B: voltar"
-    if (busca.holding()) { dica = "Digitando a busca" }
-    draw_text(6, 168, dica, 8, 0xFFFFFF, 0.7)
-    if (recado != "") { draw_text(314 - string_width(recado, 8), 168, recado, 8, 0xFFE070, 0.9) }
+    var dica = "A instalar   X atualizar   Y desinstalar   B voltar"
+    if (busca.holding()) { dica = "Escrevendo a busca" }
+    draw_text(6, 167, dica, 9, 0xFFFFFF, 0.75)
+    if (recado != "") { draw_text(314 - string_width(recado, 9), 167, recado, 9, 0xFFE070, 0.95) }
 }
 
 function cabecalho() {
@@ -166,7 +166,7 @@ function detalhes() {
     if (game_installed(id)) {
         var marca = "instalado"
         if (store_can_uninstall(id)) { marca = "da loja" }
-        draw_text(310 - string_width(marca, 8), 108, marca, 8, 0x7BD36B, 0.9)
+        draw_text(310 - string_width(marca, 9), 107, marca, 9, 0x7BD36B, 0.95)
     }
     var linhas = quebrar(store_info(id), 144, 9)
     for (var i = 0; i < array_length(linhas) && i < 2; i++) {

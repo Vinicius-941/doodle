@@ -514,7 +514,7 @@ arquivo são relativos à pasta do jogo.
 | `draw_clear(cor)` | Pinta a tela inteira (e limpa a profundidade) |
 | `draw_rectangle(x, y, w, h, cor, alpha = 1)` | Retângulo |
 | `draw_gradient(x, y, w, h, cor_topo, cor_base, alpha_topo = 1, alpha_base = 1)` | Gradiente vertical |
-| `draw_text(x, y, texto, tamanho, cor, alpha = 1)` | Texto (`y` = topo) |
+| `draw_text(x, y, texto, tamanho, cor, alpha = 1)` | Texto (`y` = topo). **Tamanho mínimo 9**: abaixo disso a letra perde o traço nesta tela, então o console desenha em 9 de qualquer jeito (e `string_width` mede igual) |
 | `string_width(texto, tamanho)` | Largura em pixels (para centralizar) |
 | `draw_sprite(caminho, x, y, w, h, alpha = 1)` | PNG, JPG, GIF ou BMP; devolve `false` se o arquivo não existir. Rosa `0xFF00FF` vira transparente |
 
@@ -846,9 +846,9 @@ menu e pode apagar o save pelo menu de opções (Y).
 
 ## 13. Firmware e APIs de sistema
 
-O firmware é um programa Doo com privilégios (`firmware/main.doo`, `firmware/Xmb.doo` e `firmware/Loja.doo`):
-mostra o boot, o menu estilo XMB com as categorias Configurações, Jogos e Loja, e a loja como aplicativo de
-tela cheia. Só ele pode usar:
+O firmware é um programa Doo com privilégios (`firmware/main.doo`, `firmware/Xmb.doo`, `firmware/Loja.doo` e
+`firmware/Config.doo`): mostra o boot, o menu estilo XMB com as categorias Configurações, Jogos e Loja, e
+duas telas de aplicativo — a loja e as configurações. Só ele pode usar:
 
 | Função | Descrição |
 |---|---|
@@ -867,6 +867,10 @@ As configurações do firmware (volume, tema e o endereço da loja, na chave `lo
 assinado** por essa chave — pacote adulterado no caminho, ou vindo de outra loja, é recusado na hora, antes
 de gravar. Sem `loja.pub`, instala sem conferir (modo caseiro). A chave privada fica com quem publica e
 nunca vai para o console. É ECDSA P-256, do próprio Windows.
+
+**Configurações como aplicativo** (`firmware/Config.doo`): volume, tema, o endereço da loja (escrito no
+teclado da tela, que antes só dava para mudar na mão em `saves/sistema.sav`) e a tela "sobre" com a
+resolução, quantos jogos estão instalados e o estado da loja. **B** volta ao menu.
 
 **A loja como aplicativo** (`firmware/Loja.doo`): a coluna Loja do menu tem um item só, "Abrir a loja", que
 entrega a tela inteira para ela — lista rolando à esquerda, detalhes do jogo à direita (ícone, título,
@@ -909,6 +913,7 @@ hardware da Fase 3 (aperte **F3** para ver, ou rode com `--fps`).
 | Limite | Valor | O que acontece ao passar |
 |---|---|---|
 | Tela | 320 × 180, 16:9 | Fixo: não há como pedir outra resolução |
+| Texto | Tamanho mínimo 9 | Menor que isso vira mancha, então o console desenha em 9 |
 | Quadros | 60 por segundo | O console espera o vsync |
 | Triângulos | 30 000 por quadro | Aviso no terminal e o contador fica vermelho |
 | Desenhos | 600 por quadro | Idem |

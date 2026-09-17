@@ -474,8 +474,10 @@ struct Font {
 };
 static std::map<int, Font> fonts;
 
+// O menor tamanho que ainda tem traço nesta tela é 9: pedir menos desenha em 9, para não virar mancha.
+// Medir e desenhar passam por aqui, então o layout de quem pediu 8 continua batendo com o que aparece.
 static const Font& font(int size) {
-    size = std::clamp(size, 5, 96);
+    size = std::clamp(size, 9, 96);
     if (auto it = fonts.find(size); it != fonts.end()) return it->second;
     Font f;
     HDC dc = CreateCompatibleDC(nullptr);

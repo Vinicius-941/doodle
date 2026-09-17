@@ -94,5 +94,5 @@ function teclado() {
             draw_text(tx + 7 - string_width(c, 10) / 2, ty + 1, c, 10, 0xFFFFFF)
         }
     }
-    draw_text(px + 4, py + altura - 11, "A: digitar  X: apagar  Y: maiúscula  Start: pronto", 8, 0xE0E8FF, 0.85)
+    draw_text(px + 4, py + altura - 12, "A digita  X apaga  Y maiúscula  Start ok", 9, 0xE0E8FF, 0.9)
 }
