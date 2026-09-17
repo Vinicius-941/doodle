@@ -556,14 +556,19 @@ jogo pode ler só os analógicos e funcionar nos dois. O esquerdo também contin
 
 | Função | Descrição |
 |---|---|
-| `audio_play_sound(hz, ms)` | Toca um tom (onda quadrada). Devolve um id |
-| `audio_play_sound("arquivo.wav", volume = 1)` | Toca um WAV (PCM 8/16 bits). Devolve um id |
-| `audio_play_loop("arquivo.wav", volume = 1)` | Toca em loop até `audio_stop_sound(id)` |
+| `audio_play_tone(hz, ms)` | Toca um tom (onda quadrada). Devolve um id |
+| `audio_play_sound("arquivo", volume = 1)` | Toca um arquivo de som. Devolve um id |
+| `audio_play_loop("arquivo", volume = 1)` | Toca em loop até `audio_stop_sound(id)` |
 | `audio_stop_sound(id)` / `audio_stop_all()` | Para um som / todos |
 | `audio_source_play()` | Com `use AudioSource`: toca `sound` na posição do objeto; o volume cai com a distância até a câmera (zero em `range`), o som sai do lado em que o objeto está na tela, e acompanha `volume` ao vivo. Devolve um id |
 | `audio_source_stop()` | Para os sons deste objeto |
 
-Os sons se misturam (vários ao mesmo tempo). Todos param quando o jogo fecha; um som posicional também para
+**Formatos:** WAV PCM de 8 ou 16 bits, e tudo o que o Windows souber decodificar — **MP3**, WMA, AAC. Ogg
+não, porque o sistema não traz esse decodificador. O arquivo é decodificado inteiro na memória quando toca
+pela primeira vez: MP3 economiza espaço no disco e no download da loja, não na memória (11 KB de MP3 viram
+uns 0,3 MB tocando). Isso conta no orçamento de mídia (seção 15).
+
+Os sons se misturam, até 24 ao mesmo tempo. Todos param quando o jogo fecha; um som posicional também para
 quando o objeto é destruído.
 
 ### 9.5 Tempo
@@ -883,7 +888,7 @@ hardware da Fase 3 (aperte **F3** para ver, ou rode com `--fps`).
 | Quadros | 60 por segundo | O console espera o vsync |
 | Triângulos | 30 000 por quadro | Aviso no terminal e o contador fica vermelho |
 | Desenhos | 600 por quadro | Idem |
-| Textura | 8 MB carregados | Idem |
+| Mídia | 8 MB de textura e som carregados | Idem |
 | Luzes | 8 por quadro | A nona é recusada (`light_point` devolve `false`) |
 | Vozes de áudio | 24 ao mesmo tempo, como o PS1 | A mais antiga (fora as de loop e posicionais) cede o lugar |
 | Jogadores | 2 controles | O teclado conta como jogador 1 |
@@ -901,7 +906,7 @@ Isto não é escolha, é trabalho a fazer:
 |---|---|
 | Física | Sem massa (dois `Rigidbody` se empurram por igual); cápsula sempre em pé; duas caixas giradas se tocando usam uma aproximação um pouco maior nas quinas |
 | Render | Sombra só de mancha (sem sombra projetada); animação de modelo só por quadros-chave (sem esqueleto); terreno com duas texturas no máximo |
-| Áudio | Só WAV PCM; som posicional com esquerda/direita só em saída estéreo |
+| Áudio | Sem streaming: o som é decodificado inteiro na memória, então música longa pesa; posicional com esquerda/direita só em saída estéreo |
 | UI | Só controle (sem mouse/toque) |
 | Controle | Teclado só para o jogador 1 |
 | Loja | Servidor de arquivos estáticos, sem conta nem pagamento |

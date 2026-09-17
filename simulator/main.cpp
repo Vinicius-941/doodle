@@ -13,6 +13,9 @@
 #include <GL/gl.h>
 #include <GL/glu.h>
 #include <wincodec.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -78,10 +81,10 @@ struct Orcamento {
 };
 static Orcamento quadro, pico;
 static double avisou = -9;  // último aviso de estouro, para não repetir todo quadro
-static long long texBytes = 0;                 // memória de textura carregada
+static long long texBytes = 0, audioBytes = 0;  // memória de mídia carregada: textura e som
 static const long long MAX_TRIS = 30000;       // por quadro (1,8 M/s a 60 fps)
 static const long long MAX_CHAMADAS = 600;     // desenhos por quadro
-static const long long MAX_TEX = 8 << 20;      // 8 MB de textura
+static const long long MAX_MIDIA = 8 << 20;    // 8 MB de textura + som juntos
 static std::map<GLuint, long long> listaTris;  // triângulos de cada display list
 static double fpsValue = 0, fpsWorst = 0;
 static double dt = 0;         // real seconds since the last frame
@@ -622,6 +625,7 @@ static std::vector<Voice> voices;
 static int nextVoiceId = 1;
 
 static void initAudio() {
+    MFStartup(MF_VERSION, MFSTARTUP_LITE);  // decodificador do Windows para MP3 e companhia
     if (FAILED(XAudio2Create(&xaudio, 0, XAUDIO2_DEFAULT_PROCESSOR)) || FAILED(xaudio->CreateMasteringVoice(&master))) {
         xaudio = nullptr;
         fprintf(stderr, "aviso: nenhum dispositivo de áudio, os jogos vão rodar mudos\n");
@@ -1040,11 +1044,69 @@ static std::map<std::string, Value> readSave(const std::string& id) {
 
 static std::map<fs::path, Wav> sounds;  // never evicted: playing voices point into these buffers
 
+// Áudio que não é WAV (MP3, WMA, AAC...) passa pelo Media Foundation, que já vem no Windows, e vira PCM
+// aqui na memória. ponytail: decodifica o arquivo inteiro na hora de tocar; música longa pede streaming.
+static Wav decodeMedia(const fs::path& p) {
+    struct Solta {  // COM: solta o que abriu, saindo por onde sair
+        IUnknown* o = nullptr;
+        ~Solta() { if (o) o->Release(); }
+    };
+    IMFSourceReader* leitor = nullptr;
+    if (FAILED(MFCreateSourceReaderFromURL(p.wstring().c_str(), nullptr, &leitor)))
+        throw std::runtime_error("o Windows não sabe ler este áudio");
+    Solta fechaLeitor{leitor};
+    IMFMediaType* pedido = nullptr;
+    if (FAILED(MFCreateMediaType(&pedido))) throw std::runtime_error("sem memória para o áudio");
+    Solta fechaPedido{pedido};
+    pedido->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+    pedido->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
+    if (FAILED(leitor->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, pedido)))
+        throw std::runtime_error("formato de áudio não suportado");
+
+    IMFMediaType* saida = nullptr;
+    if (FAILED(leitor->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &saida)))
+        throw std::runtime_error("não descobri o formato do áudio");
+    Solta fechaSaida{saida};
+    WAVEFORMATEX* fmt = nullptr;
+    UINT32 tam = 0;
+    if (FAILED(MFCreateWaveFormatExFromMFMediaType(saida, &fmt, &tam)))
+        throw std::runtime_error("não descobri o formato do áudio");
+    Wav w;
+    w.format.assign((uint8_t*)fmt, (uint8_t*)fmt + tam);
+    CoTaskMemFree(fmt);
+
+    for (;;) {
+        DWORD flags = 0;
+        IMFSample* amostra = nullptr;
+        if (FAILED(leitor->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nullptr, &flags, nullptr, &amostra)))
+            throw std::runtime_error("erro lendo o áudio");
+        if (!amostra) {
+            if (flags & MF_SOURCE_READERF_ENDOFSTREAM) break;
+            continue;  // lacuna no fluxo
+        }
+        Solta fechaAmostra{amostra};
+        IMFMediaBuffer* buffer = nullptr;
+        if (FAILED(amostra->ConvertToContiguousBuffer(&buffer))) throw std::runtime_error("erro lendo o áudio");
+        Solta fechaBuffer{buffer};
+        BYTE* dados = nullptr;
+        DWORD bytes = 0;
+        if (FAILED(buffer->Lock(&dados, nullptr, &bytes))) throw std::runtime_error("erro lendo o áudio");
+        w.data.insert(w.data.end(), dados, dados + bytes);
+        buffer->Unlock();
+    }
+    if (w.data.empty()) throw std::runtime_error("áudio vazio");
+    return w;
+}
+
 static const Wav& sound(const std::string& file) {
     fs::path p = active->base / fs::u8path(file);
     if (auto it = sounds.find(p); it != sounds.end()) return it->second;
     try {
-        return sounds[p] = parseWav(readFile(p));
+        std::string ext = p.extension().u8string();
+        for (char& c : ext) c = (char)tolower((unsigned char)c);
+        const Wav& w = sounds[p] = ext == ".wav" ? parseWav(readFile(p)) : decodeMedia(p);
+        audioBytes += (long long)w.data.size();
+        return w;
     } catch (const std::exception& e) {
         throw std::runtime_error(file + ": " + e.what());
     }
@@ -1897,13 +1959,14 @@ int main(int argc, char** argv) {
         quadro = {};  // o orçamento conta um quadro por vez
         beginFrameLighting();
         frame();
-        bool estourou = quadro.tris > MAX_TRIS || quadro.chamadas > MAX_CHAMADAS || texBytes > MAX_TEX;
+        long long midia = texBytes + audioBytes;
+        bool estourou = quadro.tris > MAX_TRIS || quadro.chamadas > MAX_CHAMADAS || midia > MAX_MIDIA;
         pico.tris = std::max(pico.tris, quadro.tris);
         pico.chamadas = std::max(pico.chamadas, quadro.chamadas);
         if (estourou && elapsed - avisou > 3) {  // avisa, não bloqueia: no PC dá, no alvo da Fase 3 pode não dar
             avisou = elapsed;
-            fprintf(stderr, "orçamento do console estourado: %lld triângulos (máx %lld), %lld desenhos (máx %lld), %.1f MB de textura (máx %lld MB)\n",
-                    quadro.tris, MAX_TRIS, quadro.chamadas, MAX_CHAMADAS, texBytes / 1048576.0, MAX_TEX >> 20);
+            fprintf(stderr, "orçamento do console estourado: %lld triângulos (máx %lld), %lld desenhos (máx %lld), %.1f MB de mídia (máx %lld MB)\n",
+                    quadro.tris, MAX_TRIS, quadro.chamadas, MAX_CHAMADAS, midia / 1048576.0, MAX_MIDIA >> 20);
         }
         if (showFps) {
             char buf[80];
@@ -1911,7 +1974,7 @@ int main(int argc, char** argv) {
                      fpsWorst * 1000);
             rect(W - 116, 3, 113, 23, 0x000000, 0.45);
             text(W - 113, 4, buf, 9, 0x9BE86B);
-            snprintf(buf, sizeof buf, "%lld tri  %lld des  %.1f MB", quadro.tris, quadro.chamadas, texBytes / 1048576.0);
+            snprintf(buf, sizeof buf, "%lld tri  %lld des  %.1f MB", quadro.tris, quadro.chamadas, midia / 1048576.0);
             text(W - 113, 14, buf, 9, estourou ? 0xFF6B6B : 0x9BE86B);
         }
         present(rc);
