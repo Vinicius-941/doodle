@@ -475,6 +475,13 @@ static int run() {
     vm.addNative("button_check_pressed", [&](Instance&, std::vector<Value>& a) { return Value((int)argNum(a, 0) == pressed); });
     for (const char* n : {"draw_text", "draw_rectangle", "audio_play_sound", "audio_play_tone"}) vm.addNative(n, [](Instance&, std::vector<Value>&) { return Value(); });
     vm.addNative("string_width", [](Instance&, std::vector<Value>&) { return Value(0.0); });
+    // medir texto é do simulador; aqui os prefabs só precisam que as funções existam
+    vm.addNative("string_shorten", [](Instance&, std::vector<Value>& a) { return a.empty() ? Value() : a[0]; });
+    vm.addNative("string_wrap", [](Instance&, std::vector<Value>& a) {
+        auto l = std::make_shared<Array>();
+        if (!a.empty()) l->push_back(a[0]);
+        return Value(l);
+    });
     vm.addNative("draw_sprite", [](Instance&, std::vector<Value>&) { return Value(false); });
     vm.addNative("delta_time_real", [](Instance&, std::vector<Value>&) { return Value(0.016); });
     std::vector<SourceFile> ui;
