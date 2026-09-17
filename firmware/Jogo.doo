@@ -1,7 +1,7 @@
 object Jogo
 
-// Tela do jogo: capa grande, o que ele ocupa em disco, se tem dados salvos e quando foi jogado, com as
-// ações num lugar só. Apagar save e desinstalar pedem confirmação, que o menu lateral antigo não pedia.
+// Tela do jogo: capa grande, o que ele ocupa em disco, se tem dados salvos, quando foi jogado e a
+// descrição do info.txt, com as ações num lugar só. Apagar save e desinstalar pedem confirmação.
 
 var xmb
 var aberta = false
@@ -13,7 +13,6 @@ var bDesinstalar
 var bVoltar
 var confirmando = ""   // "" | "save" | "jogo"
 var temSave = false
-var t = 0
 
 function create() {
     canvas = instance_create(Canvas)
@@ -48,7 +47,6 @@ function fechar() {
 
 function step() {
     if (!aberta) { return }
-    t += delta_time_real
     if (!canvas.active && !button_check(btn_a)) { canvas.active = true }
     if (confirmando != "") {   // esperando o sim ou o não
         canvas.active = false
@@ -112,6 +110,7 @@ function draw() {
 
     if (!draw_sprite("games/" + id + "/icon.png", 10, 22, 144, 81, 1)) {
         draw_rectangle(10, 22, 144, 81, 0x12141A, 1)
+        draw_text(14, 58, "sem imagem", 9, 0xFFFFFF, 0.5)
     }
     draw_text(10, 108, string_shorten(game_title(id), 300, 11), 11, 0xFFFFFF)
     var sobre = string_wrap(game_info(id, "descricao"), 144, 9)

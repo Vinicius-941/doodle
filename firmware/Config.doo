@@ -1,7 +1,7 @@
 object Config
 
-// Configurações como aplicativo: volume, tema, endereço da loja (pelo teclado da tela) e a tela "sobre".
-// O XMB abre e sai de cena, do mesmo jeito que na loja.
+// Configurações como aplicativo: volume, tema, endereço da loja (pelo teclado da tela), tela cheia, a
+// tela de controles e o "sobre". O XMB abre e sai de cena, do mesmo jeito que na loja.
 
 var xmb
 var aberta = false
@@ -12,7 +12,6 @@ var cLoja
 var bTela
 var bControles
 var controles        // a tela de controles (Controles.doo)
-var temaNomes = ["Azul", "Verde", "Roxo", "Laranja", "Grafite"]
 var urlSalva = ""    // último endereço guardado, para saber quando mudou de verdade
 var resumo = ""      // quantos jogos e quanto ocupam; medir disco é caro, então só ao abrir
 
@@ -55,7 +54,7 @@ function step() {
     if (!aberta) { return }
     if (controles && controles.aberta) { return }
     if (!canvas.active && !button_check(btn_a) && !button_check(btn_b)) { canvas.active = true }
-    bTema.text = "Tema: " + temaNomes[xmb.tema]
+    bTema.text = "Tema: " + xmb.temaNomes[xmb.tema]
     bTela.text = "Tela cheia: não"
     if (system_fullscreen()) { bTela.text = "Tela cheia: sim" }
     if (sVolume.changed) {
@@ -81,7 +80,7 @@ function step() {
         audio_play_tone(880, 60)
     }
     if (bTema.clicked) {
-        xmb.tema = (xmb.tema + 1) % array_length(temaNomes)
+        xmb.tema = (xmb.tema + 1) % array_length(xmb.temaNomes)
         save_set("tema", xmb.tema)
         canvas.tint(xmb.corTema())   // o tema novo vale já nesta tela
         audio_play_tone(660, 40)

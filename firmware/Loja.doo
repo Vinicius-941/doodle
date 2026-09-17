@@ -13,7 +13,6 @@ var ids = []             // catálogo inteiro
 var filtrados = []       // o que a busca deixou passar
 var baixando = ""
 var recado = ""          // erro do último download, mostrado no rodapé
-var t = 0
 
 function create() {
     canvas = instance_create(Canvas)
@@ -54,7 +53,6 @@ function atualizar() {   // pede o catálogo de novo
 
 function step() {
     if (!aberta) { return }
-    t += delta_time_real
     if (!canvas.active && !button_check(btn_a)) { canvas.active = true }
     if (store_ready() && array_length(ids) == 0) {
         ids = store_available()
