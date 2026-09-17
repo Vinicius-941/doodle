@@ -846,8 +846,9 @@ menu e pode apagar o save pelo menu de opções (Y).
 
 ## 13. Firmware e APIs de sistema
 
-O firmware é um programa Doo com privilégios (`firmware/main.doo` + `firmware/Xmb.doo`): mostra o boot e o
-menu estilo XMB, com as categorias Configurações, Jogos e Loja. Só ele pode usar:
+O firmware é um programa Doo com privilégios (`firmware/main.doo`, `firmware/Xmb.doo` e `firmware/Loja.doo`):
+mostra o boot, o menu estilo XMB com as categorias Configurações, Jogos e Loja, e a loja como aplicativo de
+tela cheia. Só ele pode usar:
 
 | Função | Descrição |
 |---|---|
@@ -866,6 +867,12 @@ As configurações do firmware (volume, tema e o endereço da loja, na chave `lo
 assinado** por essa chave — pacote adulterado no caminho, ou vindo de outra loja, é recusado na hora, antes
 de gravar. Sem `loja.pub`, instala sem conferir (modo caseiro). A chave privada fica com quem publica e
 nunca vai para o console. É ECDSA P-256, do próprio Windows.
+
+**A loja como aplicativo** (`firmware/Loja.doo`): a coluna Loja do menu tem um item só, "Abrir a loja", que
+entrega a tela inteira para ela — lista rolando à esquerda, detalhes do jogo à direita (ícone, título,
+descrição, tamanho e se já está instalado), busca pelo teclado da tela e barra de progresso do download.
+**A** instala ou abre, **X** atualiza o catálogo, **Y** desinstala e **B** volta ao menu. É um objeto Doo
+como outro qualquer, montado com os prefabs de UI do SDK (`Canvas`, `List`, `TextField`, `Button`).
 
 **A loja** é um servidor de arquivos estáticos: `GET /catalogo.txt` lista os jogos e `GET /<id>/<arquivo>`
 baixa cada um. Ver [store-backend/README.md](../store-backend/README.md) para o formato e para publicar.

@@ -22,10 +22,7 @@ var tema = 0
 var temaNomes = ["Azul", "Verde", "Roxo", "Laranja", "Grafite"]
 var temaCores = [0x2A5BD7, 0x2E9A5A, 0x7A3FC0, 0xD0702A, 0x5A6070]
 
-var loja = []        // ids do catálogo da loja
-var lojaTitulos = []
-var lojaCarregada = false
-var baixando = ""    // id sendo instalado agora ("" = nenhum)
+var loja             // o aplicativo da loja (Loja.doo), criado na primeira vez que abre
 
 var modo = ""        // "" navegando | "editar" (ajustando uma configuração) | "painel" | "opcoes"
 var painel = []      // linhas do painel de informação aberto
@@ -34,8 +31,6 @@ var opcoesNomes = ["Iniciar", "Apagar dados salvos", "Cancelar"]
 
 function create() {
     listarJogos()
-    store_set_url(save_get("loja", "http://localhost:8080"))
-    store_refresh()
     volume = save_get("volume", 80)
     tema = max(0, min(array_length(temaNomes) - 1, save_get("tema", 0)))
     system_volume(volume / 100)
@@ -46,7 +41,7 @@ function create() {
 function step() {
     var dt = delta_time
     t += dt
-    acompanharLoja()
+    if (loja && loja.aberta) { return }   // a loja está no ar: o menu sai de cena
     fade = min(1, fade + dt * 1.6)
     if (fade == 1) {   // sem entrada durante a transição do boot
         if (modo == "editar") {
@@ -75,26 +70,9 @@ function listarJogos() {
     }
 }
 
-// A loja trabalha numa thread do simulador: aqui só se olha o resultado, sem travar o quadro.
-function acompanharLoja() {
-    if (store_ready() && !lojaCarregada) {
-        loja = store_available()
-        lojaTitulos = []
-        for (var i = 0; i < array_length(loja); i += 1) {
-            array_push(lojaTitulos, store_title(loja[i]))
-        }
-        lojaCarregada = true
-    }
-    if (baixando != "" && !store_busy()) {
-        var erro = store_error()
-        baixando = ""
-        listarJogos()
-        if (erro == "") {
-            audio_play_tone(988, 120)
-        } else {
-            mostrar(["Não deu", erro])
-        }
-    }
+function voltar() {   // a loja fechou: o menu volta, com a lista de jogos atualizada
+    listarJogos()
+    audio_play_tone(520, 50)
 }
 
 function navegar() {
@@ -115,11 +93,6 @@ function navegar() {
     }
     if (button_check_pressed(btn_a)) {
         abrir(cat, sel[cat])
-    }
-    if (button_check_pressed(btn_x) && cat == 2 && !store_busy()) {
-        lojaCarregada = false
-        store_refresh()
-        tique()
     }
     if (button_check_pressed(btn_y) && cat == 1 && array_length(jogos) > 0) {
         modo = "opcoes"
@@ -143,33 +116,13 @@ function abrir(c, i) {
             iniciar(jogos[i])
         }
     } else {
-        abrirLoja(i)
+        if (!loja) {
+            loja = instance_create(Loja)
+            loja.xmb = self
+        }
+        loja.abrir()
+        audio_play_tone(880, 60)
     }
-}
-
-function abrirLoja(i) {
-    if (array_length(loja) == 0) {
-        mostrar(["Loja Doodle", estadoLoja(), "Servidor: " + save_get("loja", "http://localhost:8080"), "X: tentar de novo"])
-        return
-    }
-    var id = loja[i]
-    if (game_installed(id)) {
-        iniciar(id)
-        return
-    }
-    if (store_busy()) {
-        return
-    }
-    baixando = id
-    store_install(id)
-    audio_play_tone(660, 80)
-}
-
-function estadoLoja() {
-    if (store_error() != "") { return store_error() }
-    if (store_busy()) { return "Conectando..." }
-    if (store_ready()) { return "A loja está vazia." }
-    return "Sem resposta da loja."
 }
 
 function editar() {
@@ -243,12 +196,6 @@ function cortar(s, largura, tam) {   // encurta até caber, com reticências
     return s + "..."
 }
 
-function tamanho(id) {
-    var b = store_size(id)
-    if (b >= 1048576) { return floor(b / 104857.6) / 10 + " MB" }
-    return max(1, floor(b / 1024)) + " KB"
-}
-
 function tique() {
     audio_play_tone(660, 30)
 }
@@ -258,13 +205,13 @@ function tique() {
 function contar(c) {
     if (c == 0) { return 3 }
     if (c == 1) { return max(1, array_length(jogos)) }
-    return max(1, array_length(loja))
+    return 1
 }
 
 function rotulo(c, i) {
     if (c == 0) { return ["Volume", "Tema", "Sobre o Doodle"][i] }
     if (c == 1) { return "Nenhum jogo instalado" }
-    return "Loja Doodle"
+    return "Abrir a loja"
 }
 
 function valor(c, i) {
@@ -277,12 +224,13 @@ function dica(c, i) {
     if (c == 0 && i < 2) { return "A: ajustar" }
     if (c == 0) { return "Versão do sistema" }
     if (c == 1) { return "Ponha jogos em games/" }
-    return estadoLoja()
+    return "Baixar jogos novos"
 }
 
 // ---------- desenho ----------
 
 function draw() {
+    if (loja && loja.aberta) { return }   // quem desenha agora é a loja
     fundo()
 
     var hora = clock_date() + "  " + clock_time()
@@ -333,11 +281,6 @@ function draw() {
 
     var dicas = "A: abrir    Esq/Dir: muda"
     if (cat == 1) { dicas = "A: jogar    Y: opções" }
-    if (cat == 2) {
-        dicas = "A: instalar    X: atualizar"
-        if (store_busy()) { dicas = "Loja: falando com o servidor..." }
-        if (store_error() != "") { dicas = "Loja: " + store_error() }
-    }
     if (modo == "editar") { dicas = "Esq/Dir: ajusta    A: ok" }
     if (modo == "opcoes") { dicas = "A: confirmar    B: voltar" }
     if (modo != "painel") { draw_text(12, 166, dicas, 10, 0xFFFFFF, 0.75) }
@@ -368,22 +311,6 @@ function item(c, i, y, on) {
             var info = "Sem dados salvos"
             if (game_save_data(jogos[i]) != "") { info = "Dados salvos" }
             draw_text(col + 46, y + 4, info, 9, 0xE0E8FF, 0.85)
-        }
-        return
-    }
-    if (c == 2 && array_length(loja) > 0) {
-        var id = loja[i]
-        draw_sprite(icones[2], col - 8, y - 8, 16, 16, a)
-        draw_text(col + 16, y - 9, lojaTitulos[i], 11, 0xFFFFFF, a)
-        var estado = tamanho(id)
-        if (game_installed(id)) { estado = "Instalado" }
-        if (baixando == id) { estado = floor(store_progress() * 100) + "%" }
-        draw_text(302 - string_width(estado, 9), y - 7, estado, 9, 0xFFFFFF, a)
-        if (baixando == id) {
-            draw_rectangle(col + 16, y + 6, 190, 3, 0x000000, 0.4 * a)
-            draw_rectangle(col + 16, y + 6, 190 * store_progress(), 3, 0x7BD36B, a)
-        } else if (on) {
-            draw_text(col + 16, y + 3, store_info(id), 9, 0xE0E8FF, 0.85)
         }
         return
     }

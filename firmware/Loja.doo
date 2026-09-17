@@ -1,0 +1,213 @@
+object Loja
+
+// A loja como aplicativo: ocupa a tela inteira, com lista à esquerda, detalhes do jogo à direita, busca
+// pelo teclado da tela e barra de progresso do download. O XMB abre esta tela e some enquanto ela está no ar.
+
+var xmb                  // quem abriu, para devolver o controle no B
+var aberta = false
+var canvas
+var busca
+var lista
+var acao
+var ids = []             // catálogo inteiro
+var filtrados = []       // o que a busca deixou passar
+var baixando = ""
+var recado = ""          // erro do último download, mostrado no rodapé
+var t = 0
+
+function create() {
+    canvas = instance_create(Canvas)
+    canvas.visible = false
+    canvas.active = false
+    busca = canvas.field("Buscar", 6, 18, 150, "")
+    busca.max = 14
+    busca.placeholder = "tudo"
+    lista = canvas.list(6, 36, 150, 112, [])
+    acao = canvas.button("Instalar", 166, 144, 144, 16)
+    store_set_url(save_get("loja", "http://localhost:8080"))
+}
+
+function abrir() {
+    aberta = true
+    canvas.visible = true
+    canvas.active = false   // o A que abriu a loja ainda está apertado: espera soltar
+    canvas.focus_on(lista)
+    atualizar()
+}
+
+function fechar() {
+    aberta = false
+    canvas.visible = false
+    canvas.active = false
+    if (xmb) { xmb.voltar() }
+}
+
+function atualizar() {   // pede o catálogo de novo
+    ids = []
+    recado = ""
+    store_refresh()
+}
+
+// ---------- por quadro ----------
+
+function step() {
+    if (!aberta) { return }
+    t += delta_time_real
+    if (!canvas.active && !button_check(btn_a)) { canvas.active = true }
+    if (store_ready() && array_length(ids) == 0) {
+        ids = store_available()
+        filtrar()
+        canvas.focus_on(lista)   // chegou o catálogo: o foco vai para a lista, não para a busca
+    }
+    if (baixando != "" && !store_busy()) {   // acabou o download
+        recado = store_error()
+        if (recado == "") { recado = "Instalado!" }
+        baixando = ""
+        filtrar()
+    }
+    if (busca.changed) { filtrar() }
+    if (button_check_pressed(btn_b) && !busca.holding()) { fechar() }
+    if (button_check_pressed(btn_x) && !busca.holding() && !store_busy()) { atualizar() }
+    if (button_check_pressed(btn_y) && !busca.holding()) { desinstalar() }
+    if (acao.clicked || lista.clicked) { agir() }
+    acao.text = rotuloAcao()
+}
+
+function atual() {   // id do jogo escolhido, ou "" se a lista está vazia
+    if (array_length(filtrados) == 0) { return "" }
+    return filtrados[clamp(lista.index, 0, array_length(filtrados) - 1)]
+}
+
+function filtrar() {
+    filtrados = []
+    var nomes = []
+    var procura = string_lower(busca.value)
+    for (var i = 0; i < array_length(ids); i++) {
+        var titulo = store_title(ids[i])
+        if (procura == "" || string_pos(procura, string_lower(titulo)) > 0) {
+            array_push(filtrados, ids[i])
+            array_push(nomes, titulo)
+        }
+    }
+    lista.items = nomes
+    lista.index = clamp(lista.index, 0, max(0, array_length(nomes) - 1))
+}
+
+function rotuloAcao() {
+    var id = atual()
+    if (id == "") { return "-" }
+    if (baixando == id) { return floor(store_progress() * 100) + "%" }
+    if (store_busy()) { return "aguarde" }
+    if (game_installed(id)) { return "Abrir" }
+    return "Instalar " + tamanho(id)
+}
+
+function agir() {
+    var id = atual()
+    if (id == "" || store_busy()) { return }
+    if (game_installed(id)) {
+        system_launch(id)
+        return
+    }
+    baixando = id
+    recado = ""
+    store_install(id)
+}
+
+function desinstalar() {
+    var id = atual()
+    if (id == "" || !game_installed(id) || !store_can_uninstall(id)) { return }
+    store_uninstall(id)
+    recado = "Desinstalado."
+    audio_play_tone(330, 150)
+}
+
+function tamanho(id) {
+    var b = store_size(id)
+    if (b >= 1048576) { return floor(b / 104857.6) / 10 + " MB" }
+    return max(1, floor(b / 1024)) + " KB"
+}
+
+// ---------- desenho ----------
+
+function draw() {
+    if (!aberta) { return }
+    draw_gradient(0, 0, 320, 180, 0x0B1626, 0x16243C)
+    draw_rectangle(0, 0, 320, 14, 0x1E3358)
+    draw_text(6, 2, "LOJA DOODLE", 10, 0xFFFFFF)
+    var estado = cabecalho()
+    draw_text(314 - string_width(estado, 9), 3, estado, 9, 0xC8D8FF)
+    detalhes()
+    var dica = "A: instalar ou abrir    X: atualizar    Y: desinstalar    B: voltar"
+    if (busca.holding()) { dica = "Digitando a busca" }
+    draw_text(6, 168, dica, 8, 0xFFFFFF, 0.7)
+    if (recado != "") { draw_text(314 - string_width(recado, 8), 168, recado, 8, 0xFFE070, 0.9) }
+}
+
+function cabecalho() {
+    if (store_error() != "" && baixando == "") { return store_error() }
+    if (array_length(ids) == 0) { return "conectando..." }
+    if (array_length(filtrados) == array_length(ids)) { return array_length(ids) + " jogos" }
+    return array_length(filtrados) + " de " + array_length(ids)
+}
+
+function detalhes() {
+    var id = atual()
+    draw_rectangle(162, 18, 152, 144, 0x000000, 0.25)
+    if (id == "") {
+        draw_text(170, 70, "Nada por aqui", 10, 0xFFFFFF, 0.6)
+        return
+    }
+    if (!draw_sprite("games/" + id + "/icon.png", 166, 22, 144, 81, 1)) {
+        draw_rectangle(166, 22, 144, 81, 0x223355, 1)
+        draw_text(170, 58, "sem imagem", 9, 0xFFFFFF, 0.5)
+    }
+    draw_text(166, 106, cortar(store_title(id), 100, 11), 11, 0xFFFFFF)
+    if (game_installed(id)) {
+        var marca = "instalado"
+        if (store_can_uninstall(id)) { marca = "da loja" }
+        draw_text(310 - string_width(marca, 8), 108, marca, 8, 0x7BD36B, 0.9)
+    }
+    var linhas = quebrar(store_info(id), 144, 9)
+    for (var i = 0; i < array_length(linhas) && i < 2; i++) {
+        draw_text(166, 118 + i * 10, linhas[i], 9, 0xC8D8FF, 0.9)
+    }
+    if (baixando == id) {
+        draw_rectangle(166, 136, 144, 4, 0x000000, 0.5)
+        draw_rectangle(166, 136, 144 * store_progress(), 4, 0x7BD36B, 1)
+    }
+}
+
+function cortar(s, largura, tam) {   // encurta com reticências até caber
+    if (string_width(s, tam) <= largura) { return s }
+    while (string_length(s) > 4 && string_width(s + "...", tam) > largura) {
+        s = string_copy(s, 1, string_length(s) - 1)
+    }
+    return s + "..."
+}
+
+// Quebra o texto em linhas que cabem na largura, sem cortar palavra.
+function quebrar(texto, largura, tam) {
+    var linhas = []
+    var linha = ""
+    var palavra = ""
+    for (var i = 1; i <= string_length(texto) + 1; i++) {
+        var c = " "
+        if (i <= string_length(texto)) { c = string_char_at(texto, i) }
+        if (c != " ") {
+            palavra = palavra + c
+            continue
+        }
+        var tentativa = palavra
+        if (linha != "") { tentativa = linha + " " + palavra }
+        if (linha != "" && string_width(tentativa, tam) > largura) {
+            array_push(linhas, linha)
+            linha = palavra
+        } else {
+            linha = tentativa
+        }
+        palavra = ""
+    }
+    if (linha != "") { array_push(linhas, linha) }
+    return linhas
+}

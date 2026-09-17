@@ -925,6 +925,7 @@ static std::mutex storeMutex;  // protege catalog/storeError/catalogReady entre 
 static std::thread storeThread;
 static std::atomic<bool> storeBusy{false};
 static std::atomic<double> storeProgress{0};
+static std::atomic<bool> midiaNova{false};  // instalou algo: o que faltava em disco pode existir agora
 
 // Nomes que viram caminho em disco ou pedaço de URL: só o que não escapa da pasta do jogo.
 static void checkName(const std::string& s, bool slash) {
@@ -1027,6 +1028,7 @@ static void installGame(const std::string& id) {
     std::ofstream(tmp / ".loja", std::ios::binary) << storeUrl << "\n";  // marca de origem: só isto pode desinstalar
     fs::remove_all(gameDir(id), ec);
     fs::rename(tmp, gameDir(id));
+    midiaNova = true;
     storeProgress = 1;
 }
 
@@ -2021,6 +2023,8 @@ int main(int argc, char** argv) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glScissor(0, 0, W, H);
         glEnable(GL_SCISSOR_TEST);
+        if (midiaNova.exchange(false))  // esquece só o que não existia: o ícone do jogo recém-instalado
+            for (auto it = images.begin(); it != images.end();) it = it->second.tex ? std::next(it) : images.erase(it);
         pollInput();
         elapsed += dt;
         quadro = {};  // o orçamento conta um quadro por vez
