@@ -1682,6 +1682,13 @@ static void registerSdk() {
         auto it = kv.find(str(a, 0));
         return it != kv.end() ? it->second : a.size() > 1 ? a[1] : Value();
     });
+    vm.addNative("game_size", [](Instance&, Args& a) {  // quanto o jogo ocupa em disco, em bytes
+        std::error_code ec;
+        long long total = 0;
+        for (auto& e : fs::recursive_directory_iterator(gameDir(str(a, 0)), ec))
+            if (e.is_regular_file(ec)) total += (long long)e.file_size(ec);
+        return Value((double)total);
+    });
     vm.addNative("game_save_data", [](Instance&, Args& a) {  // a game's raw save ("" = none)
         std::string id = str(a, 0);
         if (active != &firmware && id != active->id) throw std::runtime_error("um jogo só pode ler o próprio save");

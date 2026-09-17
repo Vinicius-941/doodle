@@ -1,0 +1,147 @@
+object Jogo
+
+// Tela do jogo: capa grande, o que ele ocupa em disco, se tem dados salvos e quando foi jogado, com as
+// ações num lugar só. Apagar save e desinstalar pedem confirmação, que o menu lateral antigo não pedia.
+
+var xmb
+var aberta = false
+var id = ""
+var canvas
+var bJogar
+var bApagar
+var bDesinstalar
+var bVoltar
+var confirmando = ""   // "" | "save" | "jogo"
+var temSave = false
+var t = 0
+
+function create() {
+    canvas = instance_create(Canvas)
+    canvas.visible = false
+    canvas.active = false
+    bJogar = canvas.button("Jogar", 170, 30, 140, 18)
+    bApagar = canvas.button("Apagar dados salvos", 170, 52, 140, 18)
+    bDesinstalar = canvas.button("Desinstalar", 170, 74, 140, 18)
+    bVoltar = canvas.button("Voltar", 170, 96, 140, 18)
+}
+
+function abrir(qual) {
+    id = qual
+    aberta = true
+    confirmando = ""
+    canvas.visible = true
+    canvas.active = false   // espera soltar o botão que abriu
+    canvas.focus_on(bJogar)
+    bDesinstalar.visible = store_can_uninstall(id)
+    olharSave()
+    bVoltar.y = 74
+    if (bDesinstalar.visible) { bVoltar.y = 96 }   // sem desinstalar, o Voltar sobe e não sobra buraco
+}
+
+function fechar() {
+    aberta = false
+    canvas.visible = false
+    canvas.active = false
+    if (xmb) { xmb.voltar() }
+}
+
+function step() {
+    if (!aberta) { return }
+    t += delta_time_real
+    if (!canvas.active && !button_check(btn_a)) { canvas.active = true }
+    if (confirmando != "") {   // esperando o sim ou o não
+        canvas.active = false
+        canvas.visible = false   // a pergunta fica sozinha na tela, sem botão por cima
+        if (button_check_pressed(btn_a)) { fazer() }
+        if (button_check_pressed(btn_b)) {
+            confirmando = ""
+            canvas.visible = true
+            canvas.active = true
+            audio_play_tone(330, 60)
+        }
+        return
+    }
+    if (bJogar.clicked) { xmb.iniciar(id) }
+    if (bApagar.clicked) { pedir("save") }
+    if (bDesinstalar.clicked) { pedir("jogo") }
+    if (bVoltar.clicked || button_check_pressed(btn_b)) { fechar() }
+}
+
+function olharSave() {   // uma leitura por mudança, não uma por quadro
+    temSave = game_save_data(id) != ""
+    bApagar.alpha = 1
+    if (!temSave) { bApagar.alpha = 0.45 }   // sem nada para apagar, o botão fica apagado
+}
+
+function pedir(oque) {
+    if (oque == "save" && !temSave) {
+        audio_play_tone(160, 80)   // não há o que apagar, e o silêncio pareceria travamento
+        return
+    }
+    confirmando = oque
+    audio_play_tone(880, 60)
+}
+
+function fazer() {
+    if (confirmando == "save") {
+        system_delete_save(id)
+        olharSave()
+        audio_play_tone(330, 150)
+    } else {
+        store_uninstall(id)
+        audio_play_tone(220, 200)
+        confirmando = ""
+        fechar()
+        return
+    }
+    confirmando = ""
+    canvas.visible = true
+    canvas.active = true
+}
+
+function tamanho() {
+    var b = game_size(id)
+    if (b >= 1048576) { return floor(b / 104857.6) / 10 + " MB" }
+    return max(1, floor(b / 1024)) + " KB"
+}
+
+function draw() {
+    if (!aberta) { return }
+    draw_gradient(0, 0, 320, 180, 0x121A26, 0x1E2A3C)
+    draw_rectangle(0, 0, 320, 14, 0x2E4058)
+    draw_text(6, 2, "JOGO", 10, 0xFFFFFF)
+    draw_text(314 - string_width(id, 9), 3, id, 9, 0xC8D8FF)
+
+    if (!draw_sprite("games/" + id + "/icon.png", 10, 22, 144, 81, 1)) {
+        draw_rectangle(10, 22, 144, 81, 0x223355, 1)
+    }
+    draw_text(10, 108, game_title(id), 11, 0xFFFFFF)
+    draw_text(10, 124, "Ocupa " + tamanho() + " em disco", 9, 0xC8D8FF, 0.9)
+    var dados = "Sem dados salvos"
+    if (temSave) { dados = "Com dados salvos" }
+    draw_text(10, 136, dados, 9, 0xC8D8FF, 0.9)
+    var quando = save_get("visto_" + id, "")
+    if (quando != "") { draw_text(10, 148, "Jogado em " + quando, 9, 0xC8D8FF, 0.9) }
+    if (store_can_uninstall(id)) { draw_text(10, 160, "Veio da loja", 9, 0x7BD36B, 0.9) }
+
+    if (confirmando != "") { confirmar() }
+}
+
+function confirmar() {
+    draw_rectangle(0, 0, 320, 180, 0x000000, 0.75)
+    var pergunta = "Apagar os dados salvos?"
+    var aviso = "O progresso deste jogo vai embora."
+    if (confirmando == "jogo") {
+        pergunta = "Desinstalar o jogo?"
+        aviso = "Dá para instalar de novo pela loja."
+    }
+    draw_rectangle(30, 60, 260, 62, 0x101A2C)   // uma caixa, senão a pergunta flutua sobre a capa
+    draw_rectangle(30, 60, 260, 2, 0x4A6FA8)
+    centrado(68, pergunta, 12)
+    centrado(86, aviso, 9)
+    centrado(102, "A: sim     B: não", 10)
+}
+
+function centrado(y, s, tam) {
+    draw_text(160 - string_width(s, tam) / 2, y, s, tam, 0xFFFFFF)
+}

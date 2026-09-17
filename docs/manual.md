@@ -842,13 +842,14 @@ function fim_de_partida(pontos) {
 ```
 
 Cada jogo tem um arquivo `saves/<id>.sav` (texto, uma chave por linha). O firmware mostra "Dados salvos" no
-menu e pode apagar o save pelo menu de opções (Y).
+menu e apaga o save na tela do jogo (**Y** no menu), pedindo confirmação antes.
 
 ## 13. Firmware e APIs de sistema
 
-O firmware é um programa Doo com privilégios (`firmware/main.doo`, `firmware/Xmb.doo`, `firmware/Loja.doo` e
-`firmware/Config.doo`): mostra o boot, o menu estilo XMB com as categorias Configurações, Jogos e Loja, e
-duas telas de aplicativo — a loja e as configurações. Só ele pode usar:
+O firmware é um programa Doo com privilégios (`firmware/main.doo`, `firmware/Xmb.doo`, `firmware/Loja.doo`,
+`firmware/Config.doo` e `firmware/Jogo.doo`): mostra o boot, o menu estilo XMB com as categorias
+Configurações, Jogos e Loja, e três telas de aplicativo — a loja, as configurações e a tela do jogo. Só ele
+pode usar:
 
 | Função | Descrição |
 |---|---|
@@ -859,6 +860,7 @@ duas telas de aplicativo — a loja e as configurações. Só ele pode usar:
 | `store_refresh()` | Busca o catálogo (em segundo plano) |
 | `store_install(id)` | Baixa e instala um jogo do catálogo (em segundo plano) |
 | `store_uninstall(id)` | Apaga um jogo que veio da loja |
+| `game_size(id)` | Quanto o jogo ocupa em disco, em bytes |
 
 As configurações do firmware (volume, tema e o endereço da loja, na chave `loja`) ficam em
 `saves/sistema.sav`.
@@ -871,6 +873,12 @@ nunca vai para o console. É ECDSA P-256, do próprio Windows.
 **Configurações como aplicativo** (`firmware/Config.doo`): volume, tema, o endereço da loja (escrito no
 teclado da tela, que antes só dava para mudar na mão em `saves/sistema.sav`) e a tela "sobre" com a
 resolução, quantos jogos estão instalados e o estado da loja. **B** volta ao menu.
+
+**A tela do jogo** (`firmware/Jogo.doo`): **Y** em cima de um jogo no menu abre a ficha dele em tela cheia
+— capa grande, título, quanto ocupa em disco, se tem dados salvos, quando foi jogado pela última vez e se
+veio da loja — com Jogar, Apagar dados salvos, Desinstalar (só o que veio da loja) e Voltar. Apagar e
+desinstalar pedem confirmação, que o menu lateral antigo não pedia. Sem nada para apagar, o botão fica
+apagado. O menu guarda o último jogo aberto (chave `ultimo`) e volta nele.
 
 **A loja como aplicativo** (`firmware/Loja.doo`): a coluna Loja do menu tem um item só, "Abrir a loja", que
 entrega a tela inteira para ela — lista rolando à esquerda, detalhes do jogo à direita (ícone, título,

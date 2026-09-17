@@ -1,7 +1,7 @@
 object Xmb
 
 // Menu do sistema no estilo XMB (PS3/PSP): categorias na horizontal (esquerda/direita),
-// itens da categoria na vertical (cima/baixo). A abre, B volta, Y mostra as opções de um jogo.
+// itens da categoria na vertical (cima/baixo). A abre, B volta, Y abre a tela do jogo escolhido.
 
 var cats = ["Configurações", "Jogos", "Loja"]
 var icones = ["firmware/icones/config.png", "firmware/icones/jogos.png", "firmware/icones/loja.png"]
@@ -24,10 +24,9 @@ var temaCores = [0x2A5BD7, 0x2E9A5A, 0x7A3FC0, 0xD0702A, 0x5A6070]
 
 var loja             // o aplicativo da loja (Loja.doo), criado na primeira vez que abre
 var config           // o aplicativo de configurações (Config.doo)
+var telaJogo         // a tela de detalhes do jogo (Jogo.doo)
 
-var modo = ""        // "" navegando | "opcoes" (menu do jogo)
-var opcao = 0        // linha escolhida no menu de opções do jogo
-var opcoesNomes = ["Iniciar", "Apagar dados salvos", "Cancelar"]
+var modo = ""        // "" navegando (não há mais modo: as telas são aplicativos)
 
 function create() {
     listarJogos()
@@ -44,11 +43,7 @@ function step() {
     if (aplicativoAberto()) { return }   // loja ou configurações no ar: o menu sai de cena
     fade = min(1, fade + dt * 1.6)
     if (fade == 1) {   // sem entrada durante a transição do boot
-        if (modo == "opcoes") {
-            opcoes()
-        } else {
-            navegar()
-        }
+        navegar()
     }
     var k = min(1, dt * 12)
     cx += (cat - cx) * k
@@ -61,6 +56,11 @@ function listarJogos() {
     for (var i = 0; i < array_length(jogos); i += 1) {
         array_push(titulos, game_title(jogos[i]))
     }
+    var ultimo = save_get("ultimo", "")      // o menu volta no último jogo aberto
+    for (var i = 0; i < array_length(jogos); i += 1) {
+        if (jogos[i] == ultimo) { sel[1] = i }
+    }
+    sel[1] = max(0, min(sel[1], max(0, array_length(jogos) - 1)))
 }
 
 function voltar() {   // a loja fechou: o menu volta, com a lista de jogos atualizada
@@ -88,19 +88,19 @@ function navegar() {
         abrir(cat, sel[cat])
     }
     if (button_check_pressed(btn_y) && cat == 1 && array_length(jogos) > 0) {
-        modo = "opcoes"
-        opcao = 0
-        opcoesNomes = ["Iniciar", "Apagar dados salvos", "Cancelar"]
-        if (store_can_uninstall(jogos[sel[1]])) {
-            opcoesNomes = ["Iniciar", "Apagar dados salvos", "Desinstalar", "Cancelar"]
+        if (!telaJogo) {
+            telaJogo = instance_create(Jogo)
+            telaJogo.xmb = self
         }
-        audio_play_tone(880, 50)
+        telaJogo.abrir(jogos[sel[1]])
+        audio_play_tone(880, 60)
     }
 }
 
 function aplicativoAberto() {
     if (loja && loja.aberta) { return true }
     if (config && config.aberta) { return true }
+    if (telaJogo && telaJogo.aberta) { return true }
     return false
 }
 
@@ -126,39 +126,10 @@ function abrir(c, i) {
     }
 }
 
-function opcoes() {
-    if (button_check_pressed(btn_down) && opcao < array_length(opcoesNomes) - 1) {
-        opcao += 1
-        tique()
-    }
-    if (button_check_pressed(btn_up) && opcao > 0) {
-        opcao -= 1
-        tique()
-    }
-    if (button_check_pressed(btn_b)) {
-        modo = ""
-        audio_play_tone(520, 50)
-    }
-    if (button_check_pressed(btn_a)) {
-        var id = jogos[sel[1]]
-        var escolha = opcoesNomes[opcao]
-        modo = ""
-        if (escolha == "Iniciar") { iniciar(id) }
-        if (escolha == "Apagar dados salvos") {
-            system_delete_save(id)
-            audio_play_tone(330, 150)
-        }
-        if (escolha == "Desinstalar") {
-            store_uninstall(id)
-            listarJogos()
-            sel[1] = max(0, min(sel[1], array_length(jogos) - 1))
-            audio_play_tone(330, 150)
-        }
-    }
-}
-
 function iniciar(id) {
     audio_play_tone(988, 120)
+    save_set("ultimo", id)
+    save_set("visto_" + id, clock_date() + " " + clock_time())   // a tela do jogo mostra isso
     system_launch(id)
 }
 
@@ -231,20 +202,8 @@ function draw() {
         }
     }
 
-    if (modo == "opcoes") {   // menu lateral, como o do triângulo no PS3
-        draw_rectangle(0, 0, 320, 180, 0x000000, 0.4)
-        draw_rectangle(188, 0, 132, 180, 0x0A1020, 0.9)
-        draw_text(196, 50, cortar(titulos[sel[1]], 118, 10), 10, 0xFFFFFF)
-        for (var i = 0; i < array_length(opcoesNomes); i += 1) {
-            var oy = 76 + i * 18
-            if (i == opcao) { draw_rectangle(190, oy - 3, 128, 16, 0xFFFFFF, 0.15) }
-            draw_text(198, oy, opcoesNomes[i], 10, 0xFFFFFF)
-        }
-    }
-
     var dicas = "A: abrir    Esq/Dir: muda"
-    if (cat == 1) { dicas = "A: jogar    Y: opções" }
-    if (modo == "opcoes") { dicas = "A: confirmar    B: voltar" }
+    if (cat == 1) { dicas = "A: jogar    Y: detalhes do jogo" }
     draw_text(12, 166, dicas, 10, 0xFFFFFF, 0.8)
 
     if (fade < 1) {   // sai do preto do boot
