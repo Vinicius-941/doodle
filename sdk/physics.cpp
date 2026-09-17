@@ -51,6 +51,9 @@ struct Body {
     Mat3 rot;  // local -> mundo (identidade sem girar)
 };
 
+static bool uses(const Instance& i, const char* component);
+static bool toBody(const std::shared_ptr<Instance>& s, Body& b);
+
 void registerPhysics(VM& vm) {
     Value zero(Vec3{}), no(false);
     vm.components["BoxCollider"] = {{"position", zero}, {"size", Value(Vec3{1, 1, 1})}, {"rotation", zero}, {"trigger", no}};
@@ -61,6 +64,31 @@ void registerPhysics(VM& vm) {
                                   {"slope_limit", Value(45.0)}};
     // heights: rows of 0..1 (nil = flat) spread over size.x × size.z around position, scaled by size.y
     vm.components["TerrainCollider"] = {{"position", zero}, {"size", Value(Vec3{10, 1, 10})}, {"heights", Value()}};
+    // (x, y, z) -> altura do chão sólido mais alto abaixo desse ponto, ou nil se não houver nada embaixo.
+    // Serve para sombra, para largar objeto no chão e para saber se há piso adiante.
+    vm.addNative("ground_below", [&vm](Instance&, std::vector<Value>& a) {
+        double x = argNum(a, 0), y = argNum(a, 1), z = argNum(a, 2);
+        bool achou = false;
+        double melhor = 0;
+        auto candidato = [&](double topo) {
+            if (topo > y + 1e-4 || (achou && topo <= melhor)) return;
+            melhor = topo;
+            achou = true;
+        };
+        if (vm.scene)
+            for (auto& s : *vm.scene) {
+                if (!s->alive) continue;
+                if (uses(*s, "TerrainCollider")) {
+                    double h;
+                    if (terrainHeight(*s, x, z, h)) candidato(h);
+                }
+                Body b;
+                if (!toBody(s, b) || b.rigid || !b.solid) continue;  // só o cenário parado faz chão
+                if (std::fabs(x - b.pos.x) <= b.half.x + b.r && std::fabs(z - b.pos.z) <= b.half.z + b.r)
+                    candidato(b.pos.y + b.half.y + b.r);
+            }
+        return achou ? Value(melhor) : Value();
+    });
     vm.addNative("terrain_height", [](Instance& self, std::vector<Value>& a) {  // (x, z) on the caller's terrain
         double y;
         return terrainHeight(self, argNum(a, 0), argNum(a, 1), y) ? Value(y) : Value();  // nil outside it

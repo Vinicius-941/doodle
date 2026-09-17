@@ -16,6 +16,12 @@ var olhando = vec3(0, 0, 1)
 var ang = 0
 var t = 0
 
+function create() {
+    var s = instance_create(Shadow, position)   // sombra no chão: dá para ver onde pisar
+    s.target = self
+    s.size = 1.1
+}
+
 function step() {
     var dt = delta_time
     t += dt

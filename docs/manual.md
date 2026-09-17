@@ -512,7 +512,7 @@ arquivo são relativos à pasta do jogo.
 | `camera_set(posição, alvo, fov = 60)` | Câmera em perspectiva (vale para o quadro) |
 | `draw_mesh_mix(quadroA, quadroB, mistura, posição, rotação, escala, cor, textura = "")` | Dois `.obj` da mesma malha misturados vértice a vértice (`mistura` 0..1): é assim que se anima modelo (veja o prefab `AnimatedModel`) |
 | `camera_set_ortho(posição, alvo, largura)` | Câmera sem perspectiva: `largura` unidades do mundo cabem na tela de ponta a ponta (bom para visão isométrica e de cima) |
-| `draw_mesh(malha, posição, rotação, escala, cor, textura = "")` | Desenha uma malha. `malha` é `mesh_cube/Sphere/Cylinder/Capsule/Plane` ou um arquivo `.obj`. `rotação` em graus (vec3, ordem da Unity). `escala` é número ou vec3. `cor` tinge (0xFFFFFF mantém as cores do modelo) |
+| `draw_mesh(malha, posição, rotação, escala, cor, textura = "", alpha = 1)` | Desenha uma malha. `malha` é `mesh_cube/Sphere/Cylinder/Capsule/Plane` ou um arquivo `.obj`. `rotação` em graus (vec3, ordem da Unity). `escala` é número ou vec3. `cor` tinge (0xFFFFFF mantém as cores do modelo) |
 | `light_directional(direção, cor, intensidade = 1)` | Luz tipo sol (direção para onde ela aponta) |
 | `light_point(posição, cor, alcance, intensidade = 1)` | Lâmpada: some suavemente até `alcance` |
 | `light_spot(posição, direção, cor, alcance, ângulo = 45, intensidade = 1)` | Holofote/lanterna; `ângulo` é a abertura do cone |
@@ -599,7 +599,10 @@ coisa do firmware (seção 13).
 
 | Função | Descrição |
 |---|---|
-| `terrain_height(x, z)` | Altura do terreno do próprio objeto (que usa `TerrainCollider`) em (x, z), ou `nil` fora dele. O prefab `Terrain` expõe isso como `height_at` |
+| `terrain_height(x, z)` | Altura do terreno deste objeto (precisa de `use TerrainCollider`), ou `nil` fora dele |
+| `ground_below(x, y, z)` | Altura do chão sólido mais alto **abaixo** desse ponto (terreno e colisores parados), ou `nil` se não houver nada embaixo |
+
+O prefab `Terrain` expõe o `terrain_height` como `height_at`.
 
 ### 9.8 Sistema (só o firmware)
 
@@ -627,6 +630,8 @@ andam), A pula, câmera atrás dele. Usa `Rigidbody` e `CapsuleCollider`.
 | `controllable` | true | false ignora o controle (menus, cenas) |
 | `follow_camera` | true | Câmera atrás do personagem |
 | `camera_distance` / `camera_height` | 7 / 3 | |
+| `camera_yaw` / `look_speed` | 0 / 120 | A câmera que o analógico direito gira |
+| `shadow` | true | Cria a sombra de mancha no chão (prefab `Shadow`) |
 
 Funções: `forward()` (vec3 para onde olha), `control()`, `camera()`.
 
@@ -658,6 +663,20 @@ lampada.range = 10
 
 Campos: `object_name` (`lt_point` padrão, `lt_spot`, `lt_directional`), `enabled`, `color`, `intensity`,
 `range`, `direction` (vec3(0, -1, 0)), `angle` (45).
+
+### Shadow
+
+Sombra de mancha embaixo de um objeto, como nos jogos da época: um disco escuro no chão, que encolhe e
+clareia conforme o objeto sobe. Não tem forma nem direção de luz — serve para o pulo ficar legível.
+
+```doo
+var s = instance_create(Shadow, position)
+s.target = self      // segue esse objeto (e some quando ele morre)
+s.size = 1.1
+```
+
+Campos: `target`, `size`, `alpha`, `fade` (altura em que a sombra some de vez) e `color`. Sem `target`,
+mova a `position` na mão. O `BasicCharacterController` já cria a sua: desligue com `shadow = false`.
 
 ### AnimatedModel
 
@@ -865,7 +884,7 @@ Isto não é escolha, é trabalho a fazer:
 | Área | Limite atual |
 |---|---|
 | Física | Sem massa (dois `Rigidbody` se empurram por igual); cápsula sempre em pé; duas caixas giradas se tocando usam uma aproximação um pouco maior nas quinas |
-| Render | Sem sombras; animação de modelo só por quadros-chave (sem esqueleto); terreno com duas texturas no máximo |
+| Render | Sombra só de mancha (sem sombra projetada); animação de modelo só por quadros-chave (sem esqueleto); terreno com duas texturas no máximo |
 | Áudio | Só WAV PCM; som posicional com esquerda/direita só em saída estéreo |
 | UI | Só controle (sem mouse/toque); sem campo de texto nem listas com rolagem |
 | Controle | Teclado só para o jogador 1 |

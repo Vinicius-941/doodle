@@ -21,9 +21,14 @@ var camera_height = 3
 var camera_yaw = 0         // giro da câmera em volta do personagem (analógico direito)
 var look_speed = 120       // graus por segundo do analógico direito
 var camera_y = 0           // altura da câmera, que segue com atraso (assim o pulo aparece na tela)
+var shadow = true          // sombra de mancha no chão: ajuda a acertar o pulo
 
 function create() {
     camera_y = position.y
+    if (shadow) {
+        var s = instance_create(Shadow, position)
+        s.target = self
+    }
 }
 
 function step() {

@@ -1169,10 +1169,10 @@ static void useTexture(GLuint tex) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 }
 
-static void drawPart(GLuint list, GLuint tex, Vec3 rgb) {  // lit color x texture (GL_MODULATE / the shader)
+static void drawPart(GLuint list, GLuint tex, Vec3 rgb, double alpha = 1) {  // lit color x texture (GL_MODULATE / the shader)
     quadro.chamadas++;
     quadro.tris += listaTris[list];
-    glColor3d(rgb.x, rgb.y, rgb.z);
+    glColor4d(rgb.x, rgb.y, rgb.z, alpha);
     useTexture(tex);
     glCallList(list);
     if (tex) glDisable(GL_TEXTURE_2D);
@@ -1400,6 +1400,7 @@ static void registerSdk() {
         glPopMatrix();
         return Value();
     });
+    // (malha, posição, rotação, escala, cor, textura = "", alpha = 1)
     vm.addNative("draw_mesh", [](Instance&, Args& a) {
         const Model* mdl = nullptr;
         int m = -1;
@@ -1418,6 +1419,7 @@ static void registerSdk() {
         }
         Vec3 tint = rgb01(argNum(a, 4));
         GLuint tex = a.size() > 5 && !str(a, 5).empty() ? texture(active->base / fs::u8path(str(a, 5))) : 0;
+        double alpha = std::clamp(opt(a, 6, 1), 0.0, 1.0);
         mode3D();
         glPushMatrix();
         glTranslated(p.x, p.y, p.z);
@@ -1426,9 +1428,10 @@ static void registerSdk() {
         glRotated(r.z, 0, 0, 1);
         glScaled(s.x, s.y, s.z);
         if (mdl) {
-            for (auto& part : mdl->parts) drawPart(part.list, tex ? tex : part.tex, {tint.x * part.color.x, tint.y * part.color.y, tint.z * part.color.z});
+            for (auto& part : mdl->parts)
+                drawPart(part.list, tex ? tex : part.tex, {tint.x * part.color.x, tint.y * part.color.y, tint.z * part.color.z}, alpha);
         } else {
-            drawPart(meshBase + m, tex, tint);
+            drawPart(meshBase + m, tex, tint, alpha);
         }
         glPopMatrix();
         return Value();

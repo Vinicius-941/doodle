@@ -1,0 +1,35 @@
+object Shadow
+
+// Sombra de mancha embaixo de um objeto, como nos jogos da época: um disco escuro no chão, que encolhe e
+// clareia conforme o objeto sobe. Não é sombra de verdade (não tem forma nem direção de luz), mas é o que
+// faz o pulo ficar legível.
+//     var s = instance_create(Shadow, position)
+//     s.target = self          // segue esse objeto; sem target, use position
+// Ela se destrói sozinha quando o objeto que segue morre.
+
+var position = vec3(0, 0, 0)
+var target                 // objeto seguido (opcional)
+var size = 1.3             // largura no chão
+var alpha = 0.38
+var fade = 6               // altura em que a sombra some de vez
+var color = 0x000000
+var seguindo = false
+
+function step() {
+    if (target) {
+        position = target.position
+        seguindo = true
+    } else if (seguindo) {
+        instance_destroy()   // o dono morreu: a sombra vai junto
+    }
+}
+
+function draw() {
+    var chao = ground_below(x, y + 0.1, z)
+    if (chao == nil) { return }
+    var alto = max(0, y - chao)
+    var a = alpha * clamp(1 - alto / fade, 0, 1)
+    if (a < 0.02) { return }
+    var largura = size * (1 - alto / fade * 0.35)
+    draw_mesh(mesh_cylinder, vec3(x, chao + 0.04, z), vec3(0, 0, 0), vec3(largura, 0.02, largura), color, "", a)
+}
