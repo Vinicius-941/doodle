@@ -776,8 +776,9 @@ if (fases.clicked) { ... fases.index ... }
 `Canvas`:
 
 - Desenha os elementos na ordem em que foram criados, por cima do 3D.
-- Cuida do foco: o direcional leva ao elemento mais próximo naquela direção, A aperta botões e
-  esquerda/direita ajustam sliders.
+- Cuida do foco: o direcional leva ao elemento mais próximo naquela direção — preferindo os que encostam
+  na faixa do atual, para "direita" não pular de linha —, A aperta botões e esquerda/direita ajustam
+  sliders.
 - Campos: `visible`, `active` (false = só mostra, bom para HUD), `sounds`, `accent` (cor do foco).
 - Funções: `text`, `image`, `button`, `slider`, `field`, `list`, `add(elemento)`, `focus_on(elemento)` e
   `tint(cor)`, que troca a cor do foco inclusive nos elementos já criados.
@@ -864,12 +865,13 @@ a loja (`Loja.doo`), as configurações (`Config.doo`), a ficha do jogo (`Jogo.d
 | `system_launch(id)` | Abre um jogo (o firmware fica suspenso e volta quando o jogo sai) |
 | `system_volume(v)` | Volume geral do console, 0..1 |
 | `system_delete_save(id)` | Apaga o save de um jogo |
+| `system_fullscreen(liga)` | Liga/desliga a tela cheia; sem argumento, responde se está em tela cheia |
 | `store_set_url(endereço)` | Endereço da loja |
 | `store_refresh()` | Busca o catálogo (em segundo plano) |
 | `store_install(id)` | Baixa e instala um jogo do catálogo (em segundo plano) |
 | `store_uninstall(id)` | Apaga um jogo que veio da loja |
 
-As configurações do firmware ficam em `saves/sistema.sav`: `volume`, `tema`, `loja` (endereço), `ultimo`
+As configurações do firmware ficam em `saves/sistema.sav`: `volume`, `tema`, `telaCheia`, `loja` (endereço), `ultimo`
 (último jogo aberto, que o menu escolhe no boot) e um `visto_<id>` por jogo, com a data da última vez que
 ele rodou.
 
@@ -877,6 +879,9 @@ ele rodou.
 `Xmb.fundoApp(titulo, canto)`, na cor do tema escolhido; as perguntas de confirmação saem de
 `Xmb.caixaTema(x, y, w, h)`, e cada aplicativo pinta o foco da sua UI com `canvas.tint(xmb.corTema())`.
 Assim não há quatro cópias do mesmo cabeçalho, e trocar o tema repinta o console inteiro.
+
+**Tela cheia:** as configurações têm "Tela cheia: sim/não", guardado na chave `telaCheia`. "Sim" liga no
+boot; "não" não força nada, para não brigar com `--console`. F11 e Alt+Enter continuam alternando na hora.
 
 **Desligar:** a coluna Configurações tem "Desligar o console", que pergunta antes, apaga a tela e fecha o
 processo. Por baixo é o mecanismo que já existia: quem destrói o objeto raiz do firmware desliga o console

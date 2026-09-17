@@ -9,6 +9,7 @@ var canvas
 var sVolume
 var bTema
 var cLoja
+var bTela
 var bControles
 var controles        // a tela de controles (Controles.doo)
 var temaNomes = ["Azul", "Verde", "Roxo", "Laranja", "Grafite"]
@@ -24,7 +25,8 @@ function create() {
     cLoja = canvas.field("Loja", 20, 86, 280, save_get("loja", "http://localhost:8080"))
     cLoja.max = 60
     urlSalva = cLoja.value
-    bControles = canvas.button("Controles", 20, 112, 280, 18)
+    bTela = canvas.button("Tela cheia", 20, 112, 136, 18)
+    bControles = canvas.button("Controles", 164, 112, 136, 18)
 }
 
 function abrir() {
@@ -54,10 +56,18 @@ function step() {
     if (controles && controles.aberta) { return }
     if (!canvas.active && !button_check(btn_a) && !button_check(btn_b)) { canvas.active = true }
     bTema.text = "Tema: " + temaNomes[xmb.tema]
+    bTela.text = "Tela cheia: não"
+    if (system_fullscreen()) { bTela.text = "Tela cheia: sim" }
     if (sVolume.changed) {
         xmb.volume = sVolume.value
         system_volume(sVolume.value / 100)
         save_set("volume", sVolume.value)
+    }
+    if (bTela.clicked) {
+        var liga = !system_fullscreen()
+        system_fullscreen(liga)
+        save_set("telaCheia", liga)   // o console liga assim na próxima vez
+        audio_play_tone(660, 40)
     }
     if (bControles.clicked) {
         if (!controles) {

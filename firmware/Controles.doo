@@ -43,6 +43,9 @@ function draw() {
     draw_text(166, 146, "Dois jogadores: o segundo", 9, 0xD8DCE4, 0.8)
     draw_text(166, 156, "joga só no controle.", 9, 0xD8DCE4, 0.8)
 
+    draw_text(12, 142, "No simulador: F11 alterna tela", 9, 0xFFFFFF, 0.7)
+    draw_text(12, 152, "cheia e F3 mostra os contadores.", 9, 0xFFFFFF, 0.7)
+
     draw_text(6, 167, "B volta", 9, 0xFFFFFF, 0.75)
 }
 

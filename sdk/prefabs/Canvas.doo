@@ -161,6 +161,10 @@ function mover(dx, dy) {
             var along = ex * dx + ey * dy
             if (along > 1) {
                 var score = along + abs(ex * dy - ey * dx) * 2
+                // Vizinho que nem encosta na faixa do atual (outra linha, indo para o lado) só vale se
+                // não houver nenhum alinhado: sem isso, "direita" pulava para o elemento de cima.
+                if (dx != 0 && (e.y >= atual.y + atual.h || atual.y >= e.y + e.h)) { score += 1000 }
+                if (dy != 0 && (e.x >= atual.x + atual.w || atual.x >= e.x + e.w)) { score += 1000 }
                 if (best < 0 || score < bestScore) {
                     best = i
                     bestScore = score

@@ -69,6 +69,8 @@ static VM vm;
 static Program firmware, game;
 static Program* active = &firmware;
 static std::string crash, pendingLaunch;
+static bool fullscreen = false;    // janela em tela cheia agora
+static int pedidoTelaCheia = -1;   // o firmware pediu (0/1); aplicado no quadro, onde a janela existe
 static const int JOGADORES = 2;
 static bool keyDown[256], held[JOGADORES][NBUTTONS], was[JOGADORES][NBUTTONS];
 static double stickX[JOGADORES], stickY[JOGADORES], lookX[JOGADORES], lookY[JOGADORES];  // -1..1 (y+ = cima/frente)
@@ -1765,6 +1767,10 @@ static void registerSdk() {
 
     // system: firmware only (enforced by the compiler)
     vm.addNative("system_launch", [](Instance&, Args& a) { pendingLaunch = str(a, 0); return Value(); });
+    vm.addNative("system_fullscreen", [](Instance&, Args& a) {  // com argumento liga/desliga; sem, só responde
+        if (!a.empty()) pedidoTelaCheia = truthy(a[0]) ? 1 : 0;
+        return Value(pedidoTelaCheia >= 0 ? pedidoTelaCheia == 1 : fullscreen);
+    });
     vm.addNative("system_volume", [](Instance&, Args& a) {  // 0..1, the whole console
         if (master) master->SetVolume((float)std::clamp(argNum(a, 0), 0.0, 1.0));
         return Value();
@@ -1890,8 +1896,6 @@ static int checkAll() {
 }
 
 // ---------- modo console: tela cheia sem borda ----------
-
-static bool fullscreen = false;
 
 // ponytail: tela cheia sem borda (nao troca a resolucao do monitor); o letterbox 4:3 do loop cuida do resto
 static void setFullscreen(HWND hwnd, bool on) {
@@ -2101,6 +2105,10 @@ int main(int argc, char** argv) {
         glEnable(GL_SCISSOR_TEST);
         if (midiaNova.exchange(false))  // esquece só o que não existia: o ícone do jogo recém-instalado
             for (auto it = images.begin(); it != images.end();) it = it->second.tex ? std::next(it) : images.erase(it);
+        if (pedidoTelaCheia >= 0) {   // o firmware mudou a configuração de tela cheia
+            setFullscreen(hwnd, pedidoTelaCheia == 1);
+            pedidoTelaCheia = -1;
+        }
         pollInput();
         elapsed += dt;
         quadro = {};  // o orçamento conta um quadro por vez

@@ -36,6 +36,8 @@ function create() {
     volume = save_get("volume", 80)
     tema = max(0, min(array_length(temaNomes) - 1, save_get("tema", 0)))
     system_volume(volume / 100)
+    // "sim" liga a tela cheia no boot; "não" não força nada, para não brigar com o --console
+    if (save_get("telaCheia", false)) { system_fullscreen(true) }
 }
 
 // ---------- entrada ----------
