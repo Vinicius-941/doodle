@@ -775,6 +775,8 @@ static void pollInput() {
     keys('J', 'L', 'K', 'I', lookX[0], lookY[0]);                   // ...e IJKL, o direito
     if (keyDown['E']) gatilhoL[0] = 1;                              // E e R, os gatilhos
     if (keyDown['R']) gatilhoR[0] = 1;
+    // Eixos não são botões, então não saem em button_key(): a tela Controles do firmware repete estas três
+    // linhas na mão. Mudou aqui, muda lá em firmware/Controles.doo.
     for (int p = 0; p < JOGADORES; p++) {                           // vibração com hora para acabar
         if (vibraAte[p] > 0 && elapsed >= vibraAte[p]) {
             XINPUT_VIBRATION zero = {};
@@ -1526,6 +1528,18 @@ static void registerSdk() {
     vm.addNative("look_y", [](Instance&, Args& a) { return Value(lookY[player(a, 0)]); });
     vm.addNative("trigger_l", [](Instance&, Args& a) { return Value(gatilhoL[player(a, 0)]); });  // 0..1
     vm.addNative("trigger_r", [](Instance&, Args& a) { return Value(gatilhoR[player(a, 0)]); });
+    vm.addNative("button_name", [](Instance&, Args& a) { return Value(std::string(buttonNames[button(a)])); });
+    vm.addNative("button_key", [](Instance&, Args& a) {  // que tecla do teclado faz esse botão, no idioma do Windows
+        int vk = keyMap[button(a)];
+        LONG lp = LONG(MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) << 16);
+        if (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT) lp |= 0x01000000;  // tecla estendida
+        wchar_t nome[64] = {};
+        if (!GetKeyNameTextW(lp, nome, 64)) return Value(std::string("?"));
+        std::string out(WideCharToMultiByte(CP_UTF8, 0, nome, -1, nullptr, 0, nullptr, nullptr), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, nome, -1, out.data(), (int)out.size(), nullptr, nullptr);
+        out.pop_back();  // o \0 que o WideCharToMultiByte conta
+        return Value(out);
+    });
     vm.addNative("pad_vibrate", [](Instance&, Args& a) {  // (motor esquerdo 0..1, motor direito 0..1, segundos, jogador = 1)
         int p = player(a, 3);
         double segundos = argNum(a, 2);

@@ -553,6 +553,8 @@ arquivo são relativos à pasta do jogo.
 | `trigger_l(jogador = 1)` / `trigger_r(jogador = 1)` | Gatilhos analógicos (LT / RT), 0..1 |
 | `pad_vibrate(esquerda, direita, segundos, jogador = 1)` | Liga os dois motores (0..1) por um tempo; `segundos` 0 desliga |
 | `pad_connected(jogador = 1)` | Há um controle plugado para esse jogador |
+| `button_name(btn_x)` | Nome do botão no console ("A", "Start"...) |
+| `button_key(btn_x)` | Tecla do teclado que faz esse botão, no idioma do Windows ("Z", "Enter"...) |
 
 Botões: `btn_up`, `btn_down`, `btn_left`, `btn_right`, `btn_a`, `btn_b`, `btn_x`, `btn_y`, `btn_l`, `btn_r`,
 `btn_start`, `btn_select`, `btn_home`.
@@ -847,9 +849,9 @@ menu e apaga o save na tela do jogo (**Y** no menu), pedindo confirmação antes
 ## 13. Firmware e APIs de sistema
 
 O firmware é um programa Doo com privilégios (`firmware/main.doo`, `firmware/Xmb.doo`, `firmware/Loja.doo`,
-`firmware/Config.doo` e `firmware/Jogo.doo`): mostra o boot, o menu estilo XMB com as categorias
-Configurações, Jogos e Loja, e três telas de aplicativo — a loja, as configurações e a tela do jogo. Só ele
-pode usar:
+`firmware/Config.doo`, `firmware/Jogo.doo` e `firmware/Controles.doo`): mostra o boot, o menu estilo XMB
+com as categorias Configurações, Jogos e Loja, e as telas de aplicativo — a loja, as configurações, a tela
+do jogo e os controles. Só ele pode usar:
 
 | Função | Descrição |
 |---|---|
@@ -871,8 +873,13 @@ de gravar. Sem `loja.pub`, instala sem conferir (modo caseiro). A chave privada 
 nunca vai para o console. É ECDSA P-256, do próprio Windows.
 
 **Configurações como aplicativo** (`firmware/Config.doo`): volume, tema, o endereço da loja (escrito no
-teclado da tela, que antes só dava para mudar na mão em `saves/sistema.sav`) e a tela "sobre" com a
-resolução, quantos jogos estão instalados e o estado da loja. **B** volta ao menu.
+teclado da tela, que antes só dava para mudar na mão em `saves/sistema.sav`), o botão "Controles" e o
+"sobre" com a resolução, quantos jogos estão instalados e o estado da loja. **B** volta ao menu.
+
+**A tela de controles** (`firmware/Controles.doo`): o botão "Controles" nas configurações mostra que tecla
+faz cada botão do console — a tabela vem de `button_key()`, ou seja, do próprio motor, e por isso nunca
+briga com o teclado de verdade. Os eixos (direcional, analógicos e gatilhos) não são botões e estão escritos
+na tela.
 
 **A tela do jogo** (`firmware/Jogo.doo`): **Y** em cima de um jogo no menu abre a ficha dele em tela cheia
 — capa grande, título, quanto ocupa em disco, se tem dados salvos, quando foi jogado pela última vez e se

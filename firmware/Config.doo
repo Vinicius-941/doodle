@@ -9,6 +9,8 @@ var canvas
 var sVolume
 var bTema
 var cLoja
+var bControles
+var controles        // a tela de controles (Controles.doo)
 var temaNomes = ["Azul", "Verde", "Roxo", "Laranja", "Grafite"]
 var urlSalva = ""    // último endereço guardado, para saber quando mudou de verdade
 
@@ -21,6 +23,7 @@ function create() {
     cLoja = canvas.field("Loja", 20, 86, 280, save_get("loja", "http://localhost:8080"))
     cLoja.max = 60
     urlSalva = cLoja.value
+    bControles = canvas.button("Controles", 20, 112, 280, 18)
 }
 
 function abrir() {
@@ -37,14 +40,31 @@ function fechar() {
     if (xmb) { xmb.voltar() }
 }
 
+function voltar() {   // a tela de controles fechou
+    canvas.visible = true
+    canvas.active = false   // espera soltar o B que fechou a outra tela
+    audio_play_tone(520, 50)
+}
+
 function step() {
     if (!aberta) { return }
-    if (!canvas.active && !button_check(btn_a)) { canvas.active = true }
+    if (controles && controles.aberta) { return }
+    if (!canvas.active && !button_check(btn_a) && !button_check(btn_b)) { canvas.active = true }
     bTema.text = "Tema: " + temaNomes[xmb.tema]
     if (sVolume.changed) {
         xmb.volume = sVolume.value
         system_volume(sVolume.value / 100)
         save_set("volume", sVolume.value)
+    }
+    if (bControles.clicked) {
+        if (!controles) {
+            controles = instance_create(Controles)
+            controles.config = self
+        }
+        canvas.visible = false
+        canvas.active = false
+        controles.abrir()
+        audio_play_tone(880, 60)
     }
     if (bTema.clicked) {
         xmb.tema = (xmb.tema + 1) % array_length(temaNomes)
@@ -61,16 +81,15 @@ function step() {
 }
 
 function draw() {
-    if (!aberta) { return }
+    if (!aberta || (controles && controles.aberta)) { return }
     draw_gradient(0, 0, 320, 180, 0x101A2C, 0x1B2A44)
     draw_rectangle(0, 0, 320, 14, 0x2A3E68)
     draw_text(6, 2, "CONFIGURAÇÕES", 10, 0xFFFFFF)
     draw_text(314 - string_width("Doodle 0.1", 9), 3, "Doodle 0.1", 9, 0xC8D8FF)
 
-    draw_text(20, 112, "Sobre o console", 10, 0xFFFFFF)
-    draw_text(20, 126, "Tela 320 x 180 (16:9) a 60 quadros por segundo", 9, 0xC8D8FF, 0.9)
-    draw_text(20, 138, array_length(game_list()) + " jogos instalados   " + estadoLoja(), 9, 0xC8D8FF, 0.9)
-    draw_text(20, 150, "Linguagem Doo, no formato da GML", 9, 0xC8D8FF, 0.9)
+    draw_text(20, 135, "Tela 320 x 180 (16:9) a 60 quadros por segundo", 9, 0xC8D8FF, 0.9)
+    draw_text(20, 145, array_length(game_list()) + " jogos instalados   " + estadoLoja(), 9, 0xC8D8FF, 0.9)
+    draw_text(20, 155, "Linguagem Doo, no formato da GML", 9, 0xC8D8FF, 0.9)
 
     var dica = "A altera   Esq/Dir ajusta   B volta"
     if (cLoja.holding()) { dica = "Escrevendo o endereço da loja" }

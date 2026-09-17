@@ -1,0 +1,54 @@
+object Controles
+
+// Tela de controles: quem roda no simulador precisa saber que tecla faz cada botão do console. A tabela dos
+// botões vem do próprio motor (button_key), então ela nunca briga com o que o teclado faz de verdade.
+
+var config
+var aberta = false
+var botoes = [btn_a, btn_b, btn_x, btn_y, btn_l, btn_r, btn_start, btn_select, btn_home]
+
+function abrir() {
+    aberta = true
+}
+
+function fechar() {
+    aberta = false
+    if (config) { config.voltar() }
+}
+
+function step() {
+    if (!aberta) { return }
+    if (button_check_pressed(btn_b)) { fechar() }
+}
+
+function draw() {
+    if (!aberta) { return }
+    draw_gradient(0, 0, 320, 180, 0x101A2C, 0x1B2A44)
+    draw_rectangle(0, 0, 320, 14, 0x2A3E68)
+    draw_text(6, 2, "CONTROLES", 10, 0xFFFFFF)
+    draw_text(314 - string_width("teclado", 9), 3, "teclado", 9, 0xC8D8FF)
+
+    for (var i = 0; i < array_length(botoes); i += 1) {
+        var y = 20 + i * 13
+        if (i % 2 == 0) { draw_rectangle(6, y - 2, 148, 13, 0xFFFFFF, 0.05) }
+        draw_text(12, y, button_name(botoes[i]), 10, 0xFFFFFF)
+        draw_text(70, y, button_key(botoes[i]), 10, 0xC8D8FF)
+    }
+
+    // Estes três não passam pela tabela de botões: são eixos, lidos direto do teclado pelo simulador.
+    par(166, 24, "Direcional e analógico", "Setas")
+    par(166, 54, "Analógico direito", "I J K L")
+    par(166, 84, "Gatilhos", "E e R")
+
+    draw_text(166, 118, "Com um controle de Xbox", 9, 0x7BD36B, 0.9)
+    draw_text(166, 128, "plugado, tudo vem dele.", 9, 0x7BD36B, 0.9)
+    draw_text(166, 146, "Dois jogadores: o segundo", 9, 0xC8D8FF, 0.8)
+    draw_text(166, 156, "joga só no controle.", 9, 0xC8D8FF, 0.8)
+
+    draw_text(6, 167, "B volta", 9, 0xFFFFFF, 0.75)
+}
+
+function par(x, y, nome, tecla) {
+    draw_text(x, y, nome, 9, 0xFFFFFF, 0.9)
+    draw_text(x, y + 11, tecla, 10, 0xC8D8FF)
+}
