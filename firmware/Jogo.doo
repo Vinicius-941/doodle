@@ -115,7 +115,11 @@ function draw() {
     if (!draw_sprite("games/" + id + "/icon.png", 10, 22, 144, 81, 1)) {
         draw_rectangle(10, 22, 144, 81, 0x223355, 1)
     }
-    draw_text(10, 108, game_title(id), 11, 0xFFFFFF)
+    draw_text(10, 108, string_shorten(game_title(id), 300, 11), 11, 0xFFFFFF)
+    var sobre = string_wrap(game_info(id, "descricao"), 144, 9)
+    for (var i = 0; i < array_length(sobre) && i < 3; i += 1) {
+        draw_text(170, 122 + i * 11, sobre[i], 9, 0xC8D8FF, 0.9)
+    }
     draw_text(10, 124, "Ocupa " + tamanho() + " em disco", 9, 0xC8D8FF, 0.9)
     var dados = "Sem dados salvos"
     if (temSave) { dados = "Com dados salvos" }

@@ -516,6 +516,8 @@ arquivo são relativos à pasta do jogo.
 | `draw_gradient(x, y, w, h, cor_topo, cor_base, alpha_topo = 1, alpha_base = 1)` | Gradiente vertical |
 | `draw_text(x, y, texto, tamanho, cor, alpha = 1)` | Texto (`y` = topo). **Tamanho mínimo 9**: abaixo disso a letra perde o traço nesta tela, então o console desenha em 9 de qualquer jeito (e `string_width` mede igual) |
 | `string_width(texto, tamanho)` | Largura em pixels (para centralizar) |
+| `string_shorten(texto, largura, tamanho)` | O texto cortado com `...` até caber na largura |
+| `string_wrap(texto, largura, tamanho)` | Array de linhas que cabem na largura, sem cortar palavra |
 | `draw_sprite(caminho, x, y, w, h, alpha = 1)` | PNG, JPG, GIF ou BMP; devolve `false` se o arquivo não existir. Rosa `0xFF00FF` vira transparente |
 
 ### 9.2 Desenho 3D
@@ -603,6 +605,8 @@ quando o objeto é destruído.
 | `game_list()` | Ids dos jogos instalados |
 | `game_installed(id)` | |
 | `game_title(id)` | Título do `info.txt` (ou o id) |
+| `game_info(id, campo)` | Qualquer linha `campo:` do `info.txt` (`""` se não tiver) |
+| `game_size(id)` | Quanto o jogo ocupa em disco, em bytes |
 | `game_save_data(id)` | Save bruto de um jogo (`""` se não houver). Um jogo só lê o próprio |
 | `store_available()` | Ids do catálogo da loja (vazio enquanto não carregou) |
 | `store_title(id)` / `store_info(id)` / `store_size(id)` | Título, descrição e tamanho em bytes de um jogo do catálogo |
@@ -862,7 +866,6 @@ do jogo e os controles. Só ele pode usar:
 | `store_refresh()` | Busca o catálogo (em segundo plano) |
 | `store_install(id)` | Baixa e instala um jogo do catálogo (em segundo plano) |
 | `store_uninstall(id)` | Apaga um jogo que veio da loja |
-| `game_size(id)` | Quanto o jogo ocupa em disco, em bytes |
 
 As configurações do firmware (volume, tema e o endereço da loja, na chave `loja`) ficam em
 `saves/sistema.sav`.
@@ -883,7 +886,7 @@ na tela.
 
 **A tela do jogo** (`firmware/Jogo.doo`): **Y** em cima de um jogo no menu abre a ficha dele em tela cheia
 — capa grande, título, quanto ocupa em disco, se tem dados salvos, quando foi jogado pela última vez e se
-veio da loja — com Jogar, Apagar dados salvos, Desinstalar (só o que veio da loja) e Voltar. Apagar e
+veio da loja, mais a `descricao:` do `info.txt` — com Jogar, Apagar dados salvos, Desinstalar (só o que veio da loja) e Voltar. Apagar e
 desinstalar pedem confirmação, que o menu lateral antigo não pedia. Sem nada para apagar, o botão fica
 apagado. O menu guarda o último jogo aberto (chave `ultimo`) e volta nele.
 

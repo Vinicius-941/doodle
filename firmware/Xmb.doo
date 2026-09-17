@@ -51,14 +51,16 @@ function step() {
 }
 
 function listarJogos() {
+    var antes = ""                           // voltar de uma tela não pode mudar o jogo escolhido
+    if (sel[1] < array_length(jogos)) { antes = jogos[sel[1]] }
     jogos = game_list()
     titulos = []
     for (var i = 0; i < array_length(jogos); i += 1) {
         array_push(titulos, game_title(jogos[i]))
     }
-    var ultimo = save_get("ultimo", "")      // o menu volta no último jogo aberto
+    if (antes == "") { antes = save_get("ultimo", "") }   // primeira lista: começa no último jogo aberto
     for (var i = 0; i < array_length(jogos); i += 1) {
-        if (jogos[i] == ultimo) { sel[1] = i }
+        if (jogos[i] == antes) { sel[1] = i }
     }
     sel[1] = max(0, min(sel[1], max(0, array_length(jogos) - 1)))
 }
@@ -131,14 +133,6 @@ function iniciar(id) {
     save_set("ultimo", id)
     save_set("visto_" + id, clock_date() + " " + clock_time())   // a tela do jogo mostra isso
     system_launch(id)
-}
-
-function cortar(s, largura, tam) {   // encurta até caber, com reticências
-    if (string_width(s, tam) <= largura) { return s }
-    while (string_length(s) > 4 && string_width(s + "...", tam) > largura) {
-        s = string_copy(s, 1, string_length(s) - 1)
-    }
-    return s + "..."
 }
 
 function tique() {

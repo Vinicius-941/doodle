@@ -8,6 +8,7 @@
 #include "obj.h"
 #include "physics.h"
 #include "save.h"
+#include "texto.h"
 #include "wav.h"
 
 #define CHECK(c) if (!(c)) { printf("FAIL linha %d: %s\n", __LINE__, #c); return 1; }
@@ -672,6 +673,20 @@ static int run() {
     auto back = decodeSave(encodeSave(save));
     CHECK(back.size() == 3 && std::get<double>(back["x"]) == 0.1 + 0.2);
     CHECK(std::get<std::string>(back["nome"]) == "a\\b\n\tc\"" && std::get<bool>(back["ok"]));
+
+    // texto na tela: quebra de linha e "..." com um medidor falso de 10 px por caractere UTF-8
+    MedeTexto mede = [](const std::string& t) {
+        double n = 0;
+        for (size_t i = 0; i < t.size(); i++) n += ((unsigned char)t[i] & 0xC0) != 0x80;  // conta caracteres
+        return n * 10;
+    };
+    auto linhas = quebraLinhas("um dois tres quatro", 100, mede);   // "um dois" = 70, com "tres" passaria de 100
+    CHECK(linhas.size() == 3 && linhas[0] == "um dois" && linhas[1] == "tres" && linhas[2] == "quatro");
+    CHECK(quebraLinhas("palavramuitolonga", 50, mede).size() == 1);  // não pica palavra: vaza numa linha só
+    CHECK(quebraLinhas("   ", 50, mede).empty());
+    CHECK(encurtaTexto("curto", 100, mede) == "curto");              // já cabe: sai igual
+    CHECK(encurtaTexto("abcdefgh", 60, mede) == "abc...");            // 6 caracteres = 60
+    CHECK(encurtaTexto("ação!!!!", 60, mede) == "açã...");             // corta caractere inteiro: o "ç" sai vivo
 
     puts("doo_test: ok");
     return 0;

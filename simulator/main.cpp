@@ -38,6 +38,7 @@
 #include "obj.h"
 #include "physics.h"
 #include "save.h"
+#include "texto.h"
 #include "wav.h"
 
 namespace fs = std::filesystem;
@@ -1055,6 +1056,17 @@ static int button(Args& a) {
     return b;
 }
 
+static std::string infoField(const std::string& id, const std::string& campo) {  // "campo: valor" do info.txt
+    std::ifstream f(gameDir(id) / "info.txt");
+    std::string marca = campo + ":";
+    for (std::string line; std::getline(f, line);) {
+        if (line.rfind(marca, 0) != 0) continue;
+        size_t b = line.find_first_not_of(" \t", marca.size()), e = line.find_last_not_of(" \t\r");
+        if (b != std::string::npos) return line.substr(b, e - b + 1);
+    }
+    return "";
+}
+
 static fs::path savePath(const std::string& id) { return root / "saves" / fs::u8path(id + ".sav"); }
 
 static std::map<std::string, Value> readSave(const std::string& id) {
@@ -1338,6 +1350,17 @@ static void registerSdk() {
         return Value();
     });
     vm.addNative("string_width", [](Instance&, Args& a) { return Value(textWidth(str(a, 0), argNum(a, 1))); });
+    vm.addNative("string_shorten", [](Instance&, Args& a) {  // (texto, largura, tam): corta com "..." até caber
+        double tam = argNum(a, 2);
+        return Value(encurtaTexto(str(a, 0), argNum(a, 1), [tam](const std::string& t) { return textWidth(t, tam); }));
+    });
+    vm.addNative("string_wrap", [](Instance&, Args& a) {  // (texto, largura, tam): linhas que cabem, sem cortar palavra
+        double tam = argNum(a, 2);
+        auto linhas = std::make_shared<Array>();
+        for (auto& l : quebraLinhas(str(a, 0), argNum(a, 1), [tam](const std::string& t) { return textWidth(t, tam); }))
+            linhas->push_back(Value(l));
+        return Value(linhas);
+    });
     vm.addNative("draw_sprite", [](Instance&, Args& a) {  // (path, x, y, w, h, alpha) -> false if the file is missing
         const Image& img = image(active->base / fs::u8path(str(a, 0)));
         if (!img.tex) return Value(false);
@@ -1672,15 +1695,12 @@ static void registerSdk() {
     vm.addNative("store_title", [](Instance&, Args& a) { return Value(catalogItem(str(a, 0)).title); });
     vm.addNative("store_info", [](Instance&, Args& a) { return Value(catalogItem(str(a, 0)).info); });
     vm.addNative("store_size", [](Instance&, Args& a) { return Value((double)catalogItem(str(a, 0)).size); });
-    vm.addNative("game_title", [](Instance&, Args& a) {  // "titulo:" line of games/<id>/info.txt, else the id
-        std::string id = str(a, 0);
-        std::ifstream f(gameDir(id) / "info.txt");
-        for (std::string line; std::getline(f, line);) {
-            if (line.rfind("titulo:", 0) != 0) continue;
-            size_t b = line.find_first_not_of(" \t", 7), e = line.find_last_not_of(" \t\r");
-            if (b != std::string::npos) return Value(line.substr(b, e - b + 1));
-        }
-        return Value(id);
+    vm.addNative("game_title", [](Instance&, Args& a) {  // "titulo:" do info.txt; sem isso, o próprio id
+        std::string id = str(a, 0), t = infoField(id, "titulo");
+        return Value(t.empty() ? id : t);
+    });
+    vm.addNative("game_info", [](Instance&, Args& a) {  // (id, campo): qualquer "campo:" do info.txt, "" se não tem
+        return Value(infoField(str(a, 0), str(a, 1)));
     });
     vm.addNative("save_set", [](Instance&, Args& a) {  // (key, value): the running program's own save data
         if (a.size() < 2) throw std::runtime_error("store.save espera (chave, valor)");

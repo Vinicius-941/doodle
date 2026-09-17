@@ -135,7 +135,7 @@ function draw() {
     draw_gradient(0, 0, 320, 180, 0x0B1626, 0x16243C)
     draw_rectangle(0, 0, 320, 14, 0x1E3358)
     draw_text(6, 2, "LOJA DOODLE", 10, 0xFFFFFF)
-    var estado = cabecalho()
+    var estado = string_shorten(cabecalho(), 230, 9)   // o que sobra do cabeçalho depois do nome da loja
     draw_text(314 - string_width(estado, 9), 3, estado, 9, 0xC8D8FF)
     detalhes()
     var dica = "A instalar   X atualizar   Y desinstalar   B voltar"
@@ -153,6 +153,7 @@ function cabecalho() {
 
 function detalhes() {
     var id = atual()
+    acao.visible = id != ""
     draw_rectangle(162, 18, 152, 144, 0x000000, 0.25)
     if (id == "") {
         draw_text(170, 70, "Nada por aqui", 10, 0xFFFFFF, 0.6)
@@ -162,13 +163,13 @@ function detalhes() {
         draw_rectangle(166, 22, 144, 81, 0x223355, 1)
         draw_text(170, 58, "sem imagem", 9, 0xFFFFFF, 0.5)
     }
-    draw_text(166, 106, cortar(store_title(id), 100, 11), 11, 0xFFFFFF)
+    draw_text(166, 106, string_shorten(store_title(id), 100, 11), 11, 0xFFFFFF)
     if (game_installed(id)) {
         var marca = "instalado"
         if (store_can_uninstall(id)) { marca = "da loja" }
         draw_text(310 - string_width(marca, 9), 107, marca, 9, 0x7BD36B, 0.95)
     }
-    var linhas = quebrar(store_info(id), 144, 9)
+    var linhas = string_wrap(store_info(id), 144, 9)
     for (var i = 0; i < array_length(linhas) && i < 2; i++) {
         draw_text(166, 118 + i * 10, linhas[i], 9, 0xC8D8FF, 0.9)
     }
@@ -176,38 +177,4 @@ function detalhes() {
         draw_rectangle(166, 136, 144, 4, 0x000000, 0.5)
         draw_rectangle(166, 136, 144 * store_progress(), 4, 0x7BD36B, 1)
     }
-}
-
-function cortar(s, largura, tam) {   // encurta com reticências até caber
-    if (string_width(s, tam) <= largura) { return s }
-    while (string_length(s) > 4 && string_width(s + "...", tam) > largura) {
-        s = string_copy(s, 1, string_length(s) - 1)
-    }
-    return s + "..."
-}
-
-// Quebra o texto em linhas que cabem na largura, sem cortar palavra.
-function quebrar(texto, largura, tam) {
-    var linhas = []
-    var linha = ""
-    var palavra = ""
-    for (var i = 1; i <= string_length(texto) + 1; i++) {
-        var c = " "
-        if (i <= string_length(texto)) { c = string_char_at(texto, i) }
-        if (c != " ") {
-            palavra = palavra + c
-            continue
-        }
-        var tentativa = palavra
-        if (linha != "") { tentativa = linha + " " + palavra }
-        if (linha != "" && string_width(tentativa, tam) > largura) {
-            array_push(linhas, linha)
-            linha = palavra
-        } else {
-            linha = tentativa
-        }
-        palavra = ""
-    }
-    if (linha != "") { array_push(linhas, linha) }
-    return linhas
 }
