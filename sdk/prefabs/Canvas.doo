@@ -87,6 +87,14 @@ function list(x, y, w, h, itens) {
     return e
 }
 
+function tint(cor) {   // cor de destaque do foco, inclusive nos elementos já criados
+    accent = cor
+    for (var i = 0; i < array_length(items); i += 1) {
+        var e = items[i]   // a Doo não deixa mexer em membro dentro do indexador
+        e.accent = cor
+    }
+}
+
 function focus_on(e) {
     for (var i = 0; i < array_length(items); i += 1) {
         if (items[i] == e) { focus = i }

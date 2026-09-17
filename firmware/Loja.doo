@@ -31,6 +31,7 @@ function abrir() {
     aberta = true
     canvas.visible = true
     canvas.active = false   // o A que abriu a loja ainda está apertado: espera soltar
+    canvas.tint(xmb.corTema())
     canvas.focus_on(lista)
     atualizar()
 }
@@ -122,6 +123,11 @@ function desinstalar() {
     audio_play_tone(330, 150)
 }
 
+function capa(id) {   // instalado: a capa do próprio jogo; só do catálogo: a que a loja baixou
+    if (game_installed(id)) { return "games/" + id + "/icon.png" }
+    return store_icon(id)
+}
+
 function tamanho(id) {
     var b = store_size(id)
     if (b >= 1048576) { return floor(b / 104857.6) / 10 + " MB" }
@@ -132,16 +138,15 @@ function tamanho(id) {
 
 function draw() {
     if (!aberta) { return }
-    draw_gradient(0, 0, 320, 180, 0x0B1626, 0x16243C)
-    draw_rectangle(0, 0, 320, 14, 0x1E3358)
-    draw_text(6, 2, "LOJA DOODLE", 10, 0xFFFFFF)
-    var estado = string_shorten(cabecalho(), 230, 9)   // o que sobra do cabeçalho depois do nome da loja
-    draw_text(314 - string_width(estado, 9), 3, estado, 9, 0xC8D8FF)
+    xmb.fundoApp("LOJA DOODLE", string_shorten(cabecalho(), 230, 9))
     detalhes()
     var dica = "A instalar   X atualizar   Y desinstalar   B voltar"
     if (busca.holding()) { dica = "Escrevendo a busca" }
     draw_text(6, 167, dica, 9, 0xFFFFFF, 0.75)
-    if (recado != "") { draw_text(314 - string_width(recado, 9), 167, recado, 9, 0xFFE070, 0.95) }
+    if (recado != "") {
+        var curto = string_shorten(recado, 314 - string_width(dica, 9) - 12, 9)
+        draw_text(314 - string_width(curto, 9), 167, curto, 9, 0xFFE070, 0.95)
+    }
 }
 
 function cabecalho() {
@@ -159,8 +164,8 @@ function detalhes() {
         draw_text(170, 70, "Nada por aqui", 10, 0xFFFFFF, 0.6)
         return
     }
-    if (!draw_sprite("games/" + id + "/icon.png", 166, 22, 144, 81, 1)) {
-        draw_rectangle(166, 22, 144, 81, 0x223355, 1)
+    if (!draw_sprite(capa(id), 166, 22, 144, 81, 1)) {
+        draw_rectangle(166, 22, 144, 81, 0x12141A, 1)
         draw_text(170, 58, "sem imagem", 9, 0xFFFFFF, 0.5)
     }
     draw_text(166, 106, string_shorten(store_title(id), 100, 11), 11, 0xFFFFFF)
@@ -171,7 +176,7 @@ function detalhes() {
     }
     var linhas = string_wrap(store_info(id), 144, 9)
     for (var i = 0; i < array_length(linhas) && i < 2; i++) {
-        draw_text(166, 118 + i * 10, linhas[i], 9, 0xC8D8FF, 0.9)
+        draw_text(166, 118 + i * 10, linhas[i], 9, 0xD8DCE4, 0.9)
     }
     if (baixando == id) {
         draw_rectangle(166, 136, 144, 4, 0x000000, 0.5)

@@ -10,7 +10,7 @@ var index = 0          // linha escolhida
 var scroll = 0         // primeira linha visível
 var size = 10
 var row = 13           // altura de cada linha
-var background = 0x101828
+var background = 0x12141A
 var clicked = false
 
 function focusable() { return visible && array_length(items) > 0 }

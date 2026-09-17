@@ -4,7 +4,7 @@ object Button extends UIElement
 
 var text = "Botão"
 var size = 11
-var background = 0x101828
+var background = 0x12141A
 var clicked = false
 
 function focusable() { return visible }

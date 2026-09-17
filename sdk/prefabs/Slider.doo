@@ -9,7 +9,7 @@ var min = 0
 var max = 100
 var step = 10
 var size = 10
-var background = 0x101828
+var background = 0x12141A
 var changed = false
 
 function focusable() { return visible }

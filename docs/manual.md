@@ -610,6 +610,7 @@ quando o objeto é destruído.
 | `game_save_data(id)` | Save bruto de um jogo (`""` se não houver). Um jogo só lê o próprio |
 | `store_available()` | Ids do catálogo da loja (vazio enquanto não carregou) |
 | `store_title(id)` / `store_info(id)` / `store_size(id)` | Título, descrição e tamanho em bytes de um jogo do catálogo |
+| `store_icon(id)` | Caminho da capa que a loja baixou (`""` se ainda não chegou) |
 | `store_ready()` | O catálogo já chegou |
 | `store_busy()` | A loja está baixando alguma coisa |
 | `store_progress()` | 0..1 do download em andamento |
@@ -778,7 +779,8 @@ if (fases.clicked) { ... fases.index ... }
 - Cuida do foco: o direcional leva ao elemento mais próximo naquela direção, A aperta botões e
   esquerda/direita ajustam sliders.
 - Campos: `visible`, `active` (false = só mostra, bom para HUD), `sounds`, `accent` (cor do foco).
-- Funções: `text`, `image`, `button`, `slider`, `field`, `list`, `add(elemento)` e `focus_on(elemento)`.
+- Funções: `text`, `image`, `button`, `slider`, `field`, `list`, `add(elemento)`, `focus_on(elemento)` e
+  `tint(cor)`, que troca a cor do foco inclusive nos elementos já criados.
 
 | Elemento | Campos principais |
 |---|---|
@@ -852,10 +854,10 @@ menu e apaga o save na tela do jogo (**Y** no menu), pedindo confirmação antes
 
 ## 13. Firmware e APIs de sistema
 
-O firmware é um programa Doo com privilégios (`firmware/main.doo`, `firmware/Xmb.doo`, `firmware/Loja.doo`,
-`firmware/Config.doo`, `firmware/Jogo.doo` e `firmware/Controles.doo`): mostra o boot, o menu estilo XMB
-com as categorias Configurações, Jogos e Loja, e as telas de aplicativo — a loja, as configurações, a tela
-do jogo e os controles. Só ele pode usar:
+O firmware é um programa Doo com privilégios, e são seis arquivos em `firmware/`: o boot (`main.doo`), o
+menu estilo XMB (`Xmb.doo`) com as categorias Configurações, Jogos e Loja, e quatro telas de aplicativo —
+a loja (`Loja.doo`), as configurações (`Config.doo`), a ficha do jogo (`Jogo.doo`) e os controles
+(`Controles.doo`). Só ele pode usar:
 
 | Função | Descrição |
 |---|---|
@@ -867,8 +869,18 @@ do jogo e os controles. Só ele pode usar:
 | `store_install(id)` | Baixa e instala um jogo do catálogo (em segundo plano) |
 | `store_uninstall(id)` | Apaga um jogo que veio da loja |
 
-As configurações do firmware (volume, tema e o endereço da loja, na chave `loja`) ficam em
-`saves/sistema.sav`.
+As configurações do firmware ficam em `saves/sistema.sav`: `volume`, `tema`, `loja` (endereço), `ultimo`
+(último jogo aberto, que o menu escolhe no boot) e um `visto_<id>` por jogo, com a data da última vez que
+ele rodou.
+
+**O tema vale em todas as telas.** Quem desenha o fundo e o cabeçalho de qualquer aplicativo é o menu, em
+`Xmb.fundoApp(titulo, canto)`, na cor do tema escolhido; as perguntas de confirmação saem de
+`Xmb.caixaTema(x, y, w, h)`, e cada aplicativo pinta o foco da sua UI com `canvas.tint(xmb.corTema())`.
+Assim não há quatro cópias do mesmo cabeçalho, e trocar o tema repinta o console inteiro.
+
+**Desligar:** a coluna Configurações tem "Desligar o console", que pergunta antes, apaga a tela e fecha o
+processo. Por baixo é o mecanismo que já existia: quem destrói o objeto raiz do firmware desliga o console
+(num jogo, destruir a raiz volta para o menu).
 
 **Assinatura:** se existir um arquivo `loja.pub` na raiz do console, ele **só instala jogo compilado e
 assinado** por essa chave — pacote adulterado no caminho, ou vindo de outra loja, é recusado na hora, antes
@@ -895,6 +907,13 @@ entrega a tela inteira para ela — lista rolando à esquerda, detalhes do jogo 
 descrição, tamanho e se já está instalado), busca pelo teclado da tela e barra de progresso do download.
 **A** instala ou abre, **X** atualiza o catálogo, **Y** desinstala e **B** volta ao menu. É um objeto Doo
 como outro qualquer, montado com os prefabs de UI do SDK (`Canvas`, `List`, `TextField`, `Button`).
+
+**Capas do catálogo:** um jogo que ainda não está instalado não tem capa em disco, então a loja baixa os
+`icon.png` do catálogo para `cache/loja/` logo depois de pegar a lista (são alguns KB cada) e `store_icon()`
+devolve esse caminho. O cache não expira: para baixar de novo, apague a pasta.
+
+**Download em segundo plano:** dá para sair da loja com o download andando. O menu mostra o andamento no
+canto de cima e atualiza a lista de jogos sozinho quando termina.
 
 **A loja** é um servidor de arquivos estáticos: `GET /catalogo.txt` lista os jogos e `GET /<id>/<arquivo>`
 baixa cada um. Ver [store-backend/README.md](../store-backend/README.md) para o formato e para publicar.

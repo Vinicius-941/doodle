@@ -959,6 +959,30 @@ static void storeRun(std::function<void()> job) {
     });
 }
 
+// A capa de um jogo que ainda não está instalado não existe em disco, então a loja baixa as do catálogo
+// para cache/loja/ — são alguns KB cada. Cache eterno de propósito: apagar a pasta baixa de novo.
+static fs::path capaCache(const std::string& id) { return root / "cache" / "loja" / fs::u8path(id + ".png"); }
+
+static void fetchCapas(const std::vector<StoreItem>& items) {
+    std::error_code ec;
+    fs::create_directories(root / "cache" / "loja", ec);
+    for (auto& it : items) {
+        for (auto& arq : it.files) {
+            if (arq.first != "icon.png" || arq.second > 256 * 1024) continue;
+            if (!fs::exists(capaCache(it.id), ec)) {
+                try {
+                    std::string dados = net::get(storeUrl + "/" + it.id + "/icon.png", 256 * 1024);
+                    std::ofstream(capaCache(it.id), std::ios::binary) << dados;
+                    midiaNova = true;  // a capa que faltava existe agora: o cache de imagem tenta de novo
+                } catch (const std::exception&) {
+                    // capa é enfeite: se falhar, o catálogo continua valendo
+                }
+            }
+            break;
+        }
+    }
+}
+
 static void fetchCatalog() {
     std::string txt = net::get(storeUrl + "/catalogo.txt", 1 << 20);
     std::vector<StoreItem> items;
@@ -986,9 +1010,12 @@ static void fetchCatalog() {
             items.back().size += bytes;
         }
     }
-    std::lock_guard<std::mutex> g(storeMutex);
-    catalog = std::move(items);
-    catalogReady = true;
+    {
+        std::lock_guard<std::mutex> g(storeMutex);
+        catalog = items;
+        catalogReady = true;
+    }
+    fetchCapas(items);   // o catálogo já está na tela enquanto as capas chegam
 }
 
 static StoreItem catalogItem(const std::string& id) {
@@ -1693,6 +1720,12 @@ static void registerSdk() {
         return Value(list);
     });
     vm.addNative("store_title", [](Instance&, Args& a) { return Value(catalogItem(str(a, 0)).title); });
+    vm.addNative("store_icon", [](Instance&, Args& a) {  // caminho da capa baixada, "" se ainda não chegou
+        std::string id = str(a, 0);
+        checkName(id, false);
+        std::error_code ec;
+        return Value(fs::exists(capaCache(id), ec) ? "cache/loja/" + id + ".png" : "");
+    });
     vm.addNative("store_info", [](Instance&, Args& a) { return Value(catalogItem(str(a, 0)).info); });
     vm.addNative("store_size", [](Instance&, Args& a) { return Value((double)catalogItem(str(a, 0)).size); });
     vm.addNative("game_title", [](Instance&, Args& a) {  // "titulo:" do info.txt; sem isso, o próprio id

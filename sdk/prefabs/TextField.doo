@@ -10,7 +10,7 @@ var value = ""
 var placeholder = "..."
 var max = 12
 var size = 10
-var background = 0x101828
+var background = 0x12141A
 var typing = false
 var changed = false
 var antes = ""         // para o B devolver o texto de antes
@@ -80,7 +80,7 @@ function teclado() {
     var px = 160 - largura / 2
     var py = 180 - altura - 6
     draw_rectangle(0, 0, 320, 180, 0x000000, 0.55)
-    draw_rectangle(px, py, largura, altura, 0x0A1020, 0.95)
+    draw_rectangle(px, py, largura, altura, 0x12141A, 0.97)
     var mostrado = value
     if (mostrado == "") { mostrado = "_" }
     draw_text(px + 4, py + 4, mostrado, 11, 0xFFFFFF)
@@ -94,5 +94,5 @@ function teclado() {
             draw_text(tx + 7 - string_width(c, 10) / 2, ty + 1, c, 10, 0xFFFFFF)
         }
     }
-    draw_text(px + 4, py + altura - 12, "A digita  X apaga  Y maiúscula  Start ok", 9, 0xE0E8FF, 0.9)
+    draw_text(px + 4, py + altura - 12, "A digita  X apaga  Y maiúscula  Start ok", 9, 0xD8DCE4, 0.9)
 }

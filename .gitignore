@@ -5,3 +5,4 @@ games/*/.loja
 store-backend/chave.priv
 loja.pub
 dist/
+cache/

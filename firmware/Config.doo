@@ -13,6 +13,7 @@ var bControles
 var controles        // a tela de controles (Controles.doo)
 var temaNomes = ["Azul", "Verde", "Roxo", "Laranja", "Grafite"]
 var urlSalva = ""    // último endereço guardado, para saber quando mudou de verdade
+var resumo = ""      // quantos jogos e quanto ocupam; medir disco é caro, então só ao abrir
 
 function create() {
     canvas = instance_create(Canvas)
@@ -28,8 +29,10 @@ function create() {
 
 function abrir() {
     aberta = true
+    resumo = medirJogos()
     canvas.visible = true
     canvas.active = false   // espera soltar o A que abriu
+    canvas.tint(xmb.corTema())
     canvas.focus_on(sVolume)
 }
 
@@ -60,6 +63,7 @@ function step() {
         if (!controles) {
             controles = instance_create(Controles)
             controles.config = self
+            controles.xmb = xmb
         }
         canvas.visible = false
         canvas.active = false
@@ -69,6 +73,7 @@ function step() {
     if (bTema.clicked) {
         xmb.tema = (xmb.tema + 1) % array_length(temaNomes)
         save_set("tema", xmb.tema)
+        canvas.tint(xmb.corTema())   // o tema novo vale já nesta tela
         audio_play_tone(660, 40)
     }
     if (!cLoja.holding() && cLoja.value != urlSalva) {   // fechou o teclado com um endereço novo
@@ -82,18 +87,26 @@ function step() {
 
 function draw() {
     if (!aberta || (controles && controles.aberta)) { return }
-    draw_gradient(0, 0, 320, 180, 0x101A2C, 0x1B2A44)
-    draw_rectangle(0, 0, 320, 14, 0x2A3E68)
-    draw_text(6, 2, "CONFIGURAÇÕES", 10, 0xFFFFFF)
-    draw_text(314 - string_width("Doodle 0.1", 9), 3, "Doodle 0.1", 9, 0xC8D8FF)
+    xmb.fundoApp("CONFIGURAÇÕES", "Doodle 0.1")
 
-    draw_text(20, 135, "Tela 320 x 180 (16:9) a 60 quadros por segundo", 9, 0xC8D8FF, 0.9)
-    draw_text(20, 145, array_length(game_list()) + " jogos instalados   " + estadoLoja(), 9, 0xC8D8FF, 0.9)
-    draw_text(20, 155, "Linguagem Doo, no formato da GML", 9, 0xC8D8FF, 0.9)
+    draw_text(20, 135, "Tela 320 x 180 (16:9) a 60 quadros por segundo", 9, 0xD8DCE4, 0.9)
+    draw_text(20, 145, resumo + "   " + estadoLoja(), 9, 0xD8DCE4, 0.9)
+    draw_text(20, 155, "Linguagem Doo, no formato da GML", 9, 0xD8DCE4, 0.9)
 
     var dica = "A altera   Esq/Dir ajusta   B volta"
     if (cLoja.holding()) { dica = "Escrevendo o endereço da loja" }
     draw_text(6, 167, dica, 9, 0xFFFFFF, 0.75)
+}
+
+function medirJogos() {
+    var jogos = game_list()
+    var bytes = 0
+    for (var i = 0; i < array_length(jogos); i += 1) {
+        bytes += game_size(jogos[i])
+    }
+    var quanto = max(1, floor(bytes / 1024)) + " KB"
+    if (bytes >= 1048576) { quanto = floor(bytes / 104857.6) / 10 + " MB" }
+    return array_length(jogos) + " jogos instalados (" + quanto + ")"
 }
 
 function estadoLoja() {

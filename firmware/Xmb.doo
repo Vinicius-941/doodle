@@ -22,11 +22,14 @@ var tema = 0
 var temaNomes = ["Azul", "Verde", "Roxo", "Laranja", "Grafite"]
 var temaCores = [0x2A5BD7, 0x2E9A5A, 0x7A3FC0, 0xD0702A, 0x5A6070]
 
+var raiz             // o objeto do boot (main.doo), que sabe desligar o console
 var loja             // o aplicativo da loja (Loja.doo), criado na primeira vez que abre
 var config           // o aplicativo de configurações (Config.doo)
 var telaJogo         // a tela de detalhes do jogo (Jogo.doo)
 
-var modo = ""        // "" navegando (não há mais modo: as telas são aplicativos)
+var confirmando = false   // pergunta do desligar na tela
+var desligando = 0        // fade para o preto antes de fechar
+var baixava = false       // tinha download da loja rolando no quadro anterior
 
 function create() {
     listarJogos()
@@ -40,7 +43,28 @@ function create() {
 function step() {
     var dt = delta_time
     t += dt
+    if (desligando > 0) {   // já apagando: ninguém mais mexe
+        desligando = min(1, desligando + dt * 2.5)
+        if (desligando == 1 && raiz) { raiz.desligar() }
+        return
+    }
     if (aplicativoAberto()) { return }   // loja ou configurações no ar: o menu sai de cena
+    if (store_busy()) { baixava = true }
+    if (baixava && !store_busy()) {   // download acabou com o menu na tela: a lista de jogos mudou
+        baixava = false
+        listarJogos()
+    }
+    if (confirmando) {
+        if (button_check_pressed(btn_a)) {
+            desligando = 0.001
+            audio_play_tone(392, 220)
+        }
+        if (button_check_pressed(btn_b)) {
+            confirmando = false
+            audio_play_tone(330, 60)
+        }
+        return
+    }
     fade = min(1, fade + dt * 1.6)
     if (fade == 1) {   // sem entrada durante a transição do boot
         navegar()
@@ -107,7 +131,10 @@ function aplicativoAberto() {
 }
 
 function abrir(c, i) {
-    if (c == 0) {
+    if (c == 0 && i == 1) {
+        confirmando = true
+        audio_play_tone(880, 60)
+    } else if (c == 0) {
         if (!config) {
             config = instance_create(Config)
             config.xmb = self
@@ -117,15 +144,21 @@ function abrir(c, i) {
     } else if (c == 1) {
         if (array_length(jogos) > 0) {
             iniciar(jogos[i])
+        } else {
+            abrirLoja()   // sem jogo nenhum, o A leva para onde tem jogo
         }
     } else {
-        if (!loja) {
-            loja = instance_create(Loja)
-            loja.xmb = self
-        }
-        loja.abrir()
-        audio_play_tone(880, 60)
+        abrirLoja()
     }
+}
+
+function abrirLoja() {
+    if (!loja) {
+        loja = instance_create(Loja)
+        loja.xmb = self
+    }
+    loja.abrir()
+    audio_play_tone(880, 60)
 }
 
 function iniciar(id) {
@@ -142,25 +175,26 @@ function tique() {
 // ---------- itens ----------
 
 function contar(c) {
-    if (c == 0) { return 1 }
+    if (c == 0) { return 2 }
     if (c == 1) { return max(1, array_length(jogos)) }
     return 1
 }
 
 function rotulo(c, i) {
-    if (c == 0) { return "Abrir configurações" }
+    if (c == 0) { return ["Abrir configurações", "Desligar o console"][i] }
     if (c == 1) { return "Nenhum jogo instalado" }
     return "Abrir a loja"
 }
 
 function valor(c, i) {
-    if (c == 0) { return volume + "%  " + temaNomes[tema] }
+    if (c == 0 && i == 0) { return volume + "%  " + temaNomes[tema] }
     return ""
 }
 
 function dica(c, i) {
-    if (c == 0) { return "Volume, tema, loja e sobre" }
-    if (c == 1) { return "Ponha jogos em games/" }
+    if (c == 0 && i == 0) { return "Volume, tema, loja e controles" }
+    if (c == 0) { return "Fecha o console de verdade" }
+    if (c == 1) { return "Nada aqui: baixe um na loja" }
     return "Baixar jogos novos"
 }
 
@@ -172,6 +206,11 @@ function draw() {
 
     var hora = clock_date() + "  " + clock_time()
     draw_text(312 - string_width(hora, 10), 6, hora, 10, 0xFFFFFF)
+    if (store_busy()) {   // a loja continua trabalhando com o menu na tela
+        var baixa = "loja: conectando"
+        if (store_progress() > 0) { baixa = "baixando " + floor(store_progress() * 100) + "%" }
+        draw_text(312 - string_width(baixa, 9), 20, baixa, 9, 0xD8DCE4, 0.9)
+    }
 
     for (var c = 0; c < 3; c += 1) {
         var x = col + (c - cx) * 66
@@ -197,12 +236,23 @@ function draw() {
     }
 
     var dicas = "A: abrir    Esq/Dir: muda"
-    if (cat == 1) { dicas = "A: jogar    Y: detalhes do jogo" }
+    if (cat == 1 && array_length(jogos) > 0) { dicas = "A: jogar    Y: detalhes do jogo" }
+    if (cat == 1 && array_length(jogos) == 0) { dicas = "A: abrir a loja" }
     draw_text(12, 166, dicas, 10, 0xFFFFFF, 0.8)
 
+    if (confirmando) { pergunta() }
     if (fade < 1) {   // sai do preto do boot
         draw_rectangle(0, 0, 320, 180, 0x000000, 1 - fade)
     }
+    if (desligando > 0) {   // ...e volta para o preto ao desligar
+        draw_rectangle(0, 0, 320, 180, 0x000000, desligando)
+    }
+}
+
+function pergunta() {
+    caixaTema(30, 62, 260, 56)
+    centrado(160, 70, "Desligar o console?", 12, 1)
+    centrado(160, 88, "A: desligar     B: cancelar", 10, 0.9)
 }
 
 function item(c, i, y, on) {
@@ -225,7 +275,7 @@ function item(c, i, y, on) {
         if (on) {
             var info = "Sem dados salvos"
             if (game_save_data(jogos[i]) != "") { info = "Dados salvos" }
-            draw_text(col + 46, y + 4, info, 9, 0xE0E8FF, 0.9)
+            draw_text(col + 46, y + 4, info, 9, 0xD8DCE4, 0.9)
         }
         return
     }
@@ -236,7 +286,7 @@ function item(c, i, y, on) {
         draw_text(302 - string_width(v, 10), y - 8, v, 10, 0xFFFFFF, a)
     }
     if (on) {
-        draw_text(col + 16, y + 3, dica(c, i), 9, 0xE0E8FF, 0.9)
+        draw_text(col + 16, y + 3, dica(c, i), 9, 0xD8DCE4, 0.9)
     }
 }
 
@@ -251,6 +301,27 @@ function fundo() {   // gradiente na cor do tema + onda de luz ondulando, como n
             draw_gradient(x, y, 2, 10, 0xFFFFFF, 0xFFFFFF, 0.12, 0)
         }
     }
+}
+
+// O fundo e o cabeçalho de qualquer aplicativo do firmware: assim o tema escolhido vale em todas as
+// telas, não só no menu, e não há quatro cópias deste cabeçalho espalhadas.
+function fundoApp(titulo, canto) {
+    var c = temaCores[tema]
+    draw_gradient(0, 0, 320, 180, escuro(c, 0.12), escuro(c, 0.4))
+    draw_rectangle(0, 0, 320, 14, escuro(c, 0.5))
+    draw_text(6, 2, titulo, 10, 0xFFFFFF)
+    if (canto != "") { draw_text(314 - string_width(canto, 9), 3, canto, 9, 0xD8DCE4) }
+}
+
+// A caixa das perguntas (desligar, apagar save, desinstalar): mesma cara em qualquer tela, na cor do tema.
+function caixaTema(x, y, w, h) {
+    draw_rectangle(0, 0, 320, 180, 0x000000, 0.7)
+    draw_rectangle(x, y, w, h, escuro(temaCores[tema], 0.15))
+    draw_rectangle(x, y, w, 2, 0xFFFFFF, 0.5)
+}
+
+function corTema() {
+    return temaCores[tema]
 }
 
 function escuro(c, k) {   // a mesma cor com brilho k (0..1)

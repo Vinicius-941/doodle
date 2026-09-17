@@ -15,6 +15,7 @@ function step() {
     t += delta_time
     if (!menu && (t > 2.8 || button_check_pressed(btn_a) || button_check_pressed(btn_start))) {
         menu = instance_create(Xmb)
+        menu.raiz = self
     }
 }
 
@@ -30,6 +31,11 @@ function draw() {
     }
     centered(60, "DOODLE", 34, make_color_rgb(255 * k, 255 * k, 255 * k))
     centered(104, "entertainment system", 9, make_color_rgb(120 * k, 140 * k, 200 * k))
+}
+
+// O console desliga quando a raiz do firmware morre: é o menu que pede, depois de confirmar.
+function desligar() {
+    instance_destroy()
 }
 
 function centered(y, s, size, color) {
