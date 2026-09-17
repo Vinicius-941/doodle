@@ -66,6 +66,27 @@ function slider(label, x, y, w, min, max, value) {
     return e
 }
 
+function field(label, x, y, w, texto) {
+    var e = add(instance_create(TextField))
+    e.label = label
+    e.x = x
+    e.y = y
+    e.w = w
+    e.h = 14
+    e.value = texto
+    return e
+}
+
+function list(x, y, w, h, itens) {
+    var e = add(instance_create(List))
+    e.x = x
+    e.y = y
+    e.w = w
+    e.h = h
+    e.items = itens
+    return e
+}
+
 function focus_on(e) {
     for (var i = 0; i < array_length(items); i += 1) {
         if (items[i] == e) { focus = i }
@@ -89,6 +110,10 @@ function step() {
         return
     }
     var e = items[focus]
+    if (e.holding()) {   // teclado na tela aberto: o elemento fica com o controle todo
+        e.input()
+        return
+    }
     var d = 0
     if (button_check_pressed(btn_left)) { d = -1 }
     if (button_check_pressed(btn_right)) { d = 1 }
@@ -99,8 +124,8 @@ function step() {
             mover(d, 0)
         }
     }
-    if (button_check_pressed(btn_up)) { mover(0, -1) }
-    if (button_check_pressed(btn_down)) { mover(0, 1) }
+    if (button_check_pressed(btn_up) && !e.navigate(0, -1)) { mover(0, -1) }
+    if (button_check_pressed(btn_down) && !e.navigate(0, 1)) { mover(0, 1) }
     if (button_check_pressed(btn_a) && e.activate()) {
         som(988)
     }
@@ -153,7 +178,10 @@ function draw() {
     }
     for (var i = 0; i < array_length(items); i += 1) {
         var e = items[i]
-        if (e.visible) { e.paint(i == focus && active, t) }
+        if (e.visible && !e.holding()) { e.paint(i == focus && active, t) }
+    }
+    if (focus >= 0 && items[focus].holding()) {   // teclado na tela por cima de tudo
+        items[focus].paint(true, t)
     }
 }
 

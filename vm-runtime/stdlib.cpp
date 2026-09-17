@@ -28,8 +28,31 @@ std::shared_ptr<Array>& argArray(std::vector<Value>& a, size_t i, const char* fn
     throw std::runtime_error(std::string(fn) + ": esperava um array");
 }
 
-// A GML conta caracteres a partir do 1; devolve o índice de C++ já cortado no tamanho do texto.
-size_t at1(const std::string& s, double pos) { return (size_t)std::clamp(pos - 1, 0.0, (double)s.size()); }
+// Texto é UTF-8: as funções contam **caracteres**, não bytes, como as da GML. Assim "ç" e "á" contam 1.
+size_t tamanhoSeq(unsigned char c) {
+    return c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : (c >> 3) == 30 ? 4 : 1;
+}
+
+size_t emCaracteres(const std::string& s) {
+    size_t n = 0;
+    for (size_t i = 0; i < s.size(); i += tamanhoSeq(s[i])) n++;
+    return n;
+}
+
+// A GML conta caracteres a partir do 1; devolve o deslocamento em bytes, já cortado no tamanho do texto.
+size_t at1(const std::string& s, double pos) {
+    double alvo = std::floor(pos) - 1;
+    size_t i = 0;
+    for (double n = 0; n < alvo && i < s.size(); n++) i += tamanhoSeq(s[i]);
+    return std::min(i, s.size());
+}
+
+// Quantos bytes ocupam `n` caracteres a partir do byte `i`.
+size_t bytesDe(const std::string& s, size_t i, double n) {
+    size_t fim = i;
+    for (double k = 0; k < n && fim < s.size(); k++) fim += tamanhoSeq(s[fim]);
+    return std::min(fim, s.size()) - i;
+}
 
 const double DEG = 3.14159265358979323846 / 180;
 
@@ -151,30 +174,34 @@ void registerStdlib(VM& vm) {
         }
     });
     vm.addNative("string_length", [](Instance&, std::vector<Value>& a) {
-        return Value((double)argStr(a, 0, "string_length").size());
+        return Value((double)emCaracteres(argStr(a, 0, "string_length")));
     });
     vm.addNative("string_upper", [](Instance&, std::vector<Value>& a) {
         std::string s = argStr(a, 0, "string_upper");
-        for (char& c : s) c = (char)toupper((unsigned char)c);
+        for (char& c : s)
+            if ((unsigned char)c < 0x80) c = (char)toupper((unsigned char)c);  // acento fica como está
         return Value(s);
     });
     vm.addNative("string_lower", [](Instance&, std::vector<Value>& a) {
         std::string s = argStr(a, 0, "string_lower");
-        for (char& c : s) c = (char)tolower((unsigned char)c);
+        for (char& c : s)
+            if ((unsigned char)c < 0x80) c = (char)tolower((unsigned char)c);
         return Value(s);
     });
     vm.addNative("string_char_at", [](Instance&, std::vector<Value>& a) {
         std::string& s = argStr(a, 0, "string_char_at");
         size_t i = at1(s, argNum(a, 1));
-        return Value(i < s.size() ? s.substr(i, 1) : std::string());
+        return Value(i < s.size() ? s.substr(i, bytesDe(s, i, 1)) : std::string());
     });
     vm.addNative("string_copy", [](Instance&, std::vector<Value>& a) {  // (texto, comeco, quantidade)
         std::string& s = argStr(a, 0, "string_copy");
-        return Value(s.substr(at1(s, argNum(a, 1)), (size_t)std::max(0.0, argNum(a, 2))));
+        size_t i = at1(s, argNum(a, 1));
+        return Value(s.substr(i, bytesDe(s, i, std::max(0.0, argNum(a, 2)))));
     });
     vm.addNative("string_delete", [](Instance&, std::vector<Value>& a) {
         std::string s = argStr(a, 0, "string_delete");
-        s.erase(at1(s, argNum(a, 1)), (size_t)std::max(0.0, argNum(a, 2)));
+        size_t i = at1(s, argNum(a, 1));
+        s.erase(i, bytesDe(s, i, std::max(0.0, argNum(a, 2))));
         return Value(s);
     });
     vm.addNative("string_insert", [](Instance&, std::vector<Value>& a) {  // (novo, texto, posicao)
@@ -183,8 +210,9 @@ void registerStdlib(VM& vm) {
         return Value(s);
     });
     vm.addNative("string_pos", [](Instance&, std::vector<Value>& a) {  // (pedaco, texto) -> posicao ou 0
-        size_t p = argStr(a, 1, "string_pos").find(argStr(a, 0, "string_pos"));
-        return Value(p == std::string::npos ? 0.0 : double(p + 1));
+        std::string& texto = argStr(a, 1, "string_pos");
+        size_t p = texto.find(argStr(a, 0, "string_pos"));
+        return Value(p == std::string::npos ? 0.0 : double(emCaracteres(texto.substr(0, p)) + 1));
     });
     vm.addNative("string_repeat", [](Instance&, std::vector<Value>& a) {
         std::string s, um = argStr(a, 0, "string_repeat");

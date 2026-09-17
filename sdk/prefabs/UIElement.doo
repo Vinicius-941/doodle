@@ -16,5 +16,8 @@ function paint(focused, t) {}
 function focusable() { return false }
 function activate() { return false }   // A apertado com o foco aqui; true = usou o botão
 function adjust(d) { return false }    // esquerda (-1) / direita (+1); true = usou, não move o foco
+function navigate(dx, dy) { return false }  // direcional; true = usou, o foco não sai daqui (lista)
+function holding() { return false }    // true = este elemento quer o controle inteiro (teclado na tela)
+function input() {}                    // chamado todo quadro enquanto holding()
 function reset() {}                    // começo do quadro: apaga clicked/changed
 function remove() { instance_destroy() }

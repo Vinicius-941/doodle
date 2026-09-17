@@ -468,15 +468,16 @@ static int run() {
 
     // SDK UI prefabs (real files): the Canvas moves focus spatially, A clicks, left/right adjust a slider
     int pressed = -1;
-    const char* buttons[] = {"btn_up", "btn_down", "btn_left", "btn_right", "btn_a"};
-    for (int i = 0; i < 5; i++) vm.constants[buttons[i]] = Value(double(i));
+    const char* buttons[] = {"btn_up", "btn_down", "btn_left", "btn_right", "btn_a", "btn_b", "btn_x", "btn_y", "btn_start"};
+    for (int i = 0; i < 9; i++) vm.constants[buttons[i]] = Value(double(i));
     vm.addNative("button_check_pressed", [&](Instance&, std::vector<Value>& a) { return Value((int)argNum(a, 0) == pressed); });
     for (const char* n : {"draw_text", "draw_rectangle", "audio_play_sound", "audio_play_tone"}) vm.addNative(n, [](Instance&, std::vector<Value>&) { return Value(); });
     vm.addNative("string_width", [](Instance&, std::vector<Value>&) { return Value(0.0); });
     vm.addNative("draw_sprite", [](Instance&, std::vector<Value>&) { return Value(false); });
     vm.addNative("delta_time_real", [](Instance&, std::vector<Value>&) { return Value(0.016); });
     std::vector<SourceFile> ui;
-    for (const char* n : {"UIElement", "Text", "Image", "Button", "Slider", "Canvas"}) ui.push_back({n, readPrefab(n)});
+    for (const char* n : {"UIElement", "Text", "Image", "Button", "Slider", "TextField", "List", "Canvas"})
+        ui.push_back({n, readPrefab(n)});
     const char* uiTest = "object UITest\nvar menu\nvar b1\nvar b2\nvar s\nfunction create() {\n menu = instance_create(Canvas)\n"
                          " b1 = menu.button(\"Um\", 100, 100, 200, 40)\n b2 = menu.button(\"Dois\", 100, 160, 200, 40)\n"
                          " s = menu.slider(\"Vol\", 100, 220, 200, 0, 100, 50)\n}";
@@ -495,6 +496,34 @@ static int run() {
     step(0);           // up to "Dois", then A
     step(4);
     CHECK(std::get<bool>(uiField("b2", "clicked")) && !std::get<bool>(uiField("b1", "clicked")));
+
+    // TextField: o teclado na tela digita, apaga e devolve o texto de antes no B (e conta acento como 1 letra)
+    auto campo = vm.instantiate(compileAll({{"TextField.doo", readPrefab("TextField")}}, vm, false, ui)[0]);
+    vm.call(*campo, "activate");
+    CHECK(std::get<bool>(vm.call(*campo, "holding")));
+    auto tecla = [&](int b) { pressed = b; vm.call(*campo, "input"); pressed = -1; };
+    tecla(4);                                        // A no "1" (canto do teclado)
+    CHECK(std::get<std::string>(*campo->field("value")) == "1");
+    for (int i = 0; i < 4; i++) tecla(1);            // desce até a linha dos acentos
+    tecla(4);                                        // digita "á"
+    CHECK(std::get<std::string>(*campo->field("value")) == "1á");
+    std::vector<Value> umTexto = {*campo->field("value")};
+    CHECK(std::get<double>(vm.natives[vm.nativeIndex.at("string_length")](*campo, umTexto)) == 2);  // 2 letras, 3 bytes
+    tecla(6);                                        // X apaga uma letra inteira, não meio acento
+    CHECK(std::get<std::string>(*campo->field("value")) == "1");
+    tecla(5);                                        // B cancela: volta ao texto de antes e fecha
+    CHECK(std::get<std::string>(*campo->field("value")) == "" && !std::get<bool>(vm.call(*campo, "holding")));
+
+    // List: o direcional anda nas linhas e, na ponta, deixa o foco sair
+    auto listaUi = vm.instantiate(compileAll({{"List.doo", readPrefab("List")}}, vm, false, ui)[0]);
+    *listaUi->field("items") = Value(std::make_shared<Array>(Array{Value(std::string("um")), Value(std::string("dois")),
+                                                                 Value(std::string("tres"))}));
+    CHECK(!std::get<bool>(vm.call(*listaUi, "navigate", {Value(0.0), Value(-1.0)})));  // já está na primeira
+    CHECK(std::get<bool>(vm.call(*listaUi, "navigate", {Value(0.0), Value(1.0)})));
+    CHECK(std::get<bool>(vm.call(*listaUi, "navigate", {Value(0.0), Value(1.0)})));
+    CHECK(std::get<double>(*listaUi->field("index")) == 2);
+    CHECK(!std::get<bool>(vm.call(*listaUi, "navigate", {Value(0.0), Value(1.0)})));  // acabou: o foco sai
+
 
     for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc, hillSrc, chefeSrc, lacaioSrc, lacoSrc}, vm, false)) defs[d->name] = d;
     auto level = spawn("Level", {});

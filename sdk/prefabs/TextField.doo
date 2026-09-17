@@ -1,0 +1,98 @@
+object TextField extends UIElement
+
+// Campo de texto com teclado na tela, como o do PSP: A abre o teclado, o direcional escolhe a letra,
+// A digita, X apaga, Y alterna maiúscula e Start confirma (B cancela e devolve o texto de antes).
+// No seu step, leia `value` e `changed` (vale um quadro).
+//     var nome = menu.field("Nome", 60, 40, 200, "")
+
+var label = ""
+var value = ""
+var placeholder = "..."
+var max = 12
+var size = 10
+var background = 0x101828
+var typing = false
+var changed = false
+var antes = ""         // para o B devolver o texto de antes
+var kx = 0
+var ky = 0
+var shift = false
+var teclas = ["1234567890", "qwertyuiop", "asdfghjklç", "zxcvbnm,.-", "áéíóúâêôãõ"]
+
+function focusable() { return visible }
+
+function activate() {
+    typing = true
+    antes = value
+    return true
+}
+
+function holding() { return typing }   // com o teclado aberto, o Canvas passa o controle inteiro para cá
+
+function input() {
+    var linha = teclas[ky]
+    if (button_check_pressed(btn_left)) { kx = (kx + string_length(linha) - 1) % string_length(linha) }
+    if (button_check_pressed(btn_right)) { kx = (kx + 1) % string_length(linha) }
+    if (button_check_pressed(btn_up)) { ky = (ky + array_length(teclas) - 1) % array_length(teclas) }
+    if (button_check_pressed(btn_down)) { ky = (ky + 1) % array_length(teclas) }
+    kx = min(kx, string_length(teclas[ky]) - 1)
+    if (button_check_pressed(btn_a) && string_length(value) < max) {
+        var c = string_char_at(teclas[ky], kx + 1)
+        if (shift) { c = string_upper(c) }
+        value = value + c
+        changed = true
+    }
+    if (button_check_pressed(btn_x)) {
+        value = string_copy(value, 1, string_length(value) - 1)
+        changed = true
+    }
+    if (button_check_pressed(btn_y)) { shift = !shift }
+    if (button_check_pressed(btn_start)) { typing = false }
+    if (button_check_pressed(btn_b)) {
+        value = antes
+        typing = false
+        changed = true
+    }
+}
+
+function reset() { changed = false }
+
+function paint(focused, t) {
+    draw_rectangle(x, y, w, h, background, 0.85 * alpha)
+    if (focused) {
+        draw_rectangle(x, y, w, 1, accent, alpha)
+        draw_rectangle(x, y + h - 1, w, 1, accent, alpha)
+    }
+    if (label != "") { draw_text(x + 4, y + (h - size) / 2, label, size, color, 0.8 * alpha) }
+    var texto = value
+    var a = alpha
+    if (texto == "") {
+        texto = placeholder
+        a = 0.5 * alpha
+    }
+    draw_text(x + w - 4 - string_width(texto, size), y + (h - size) / 2, texto, size, color, a)
+    if (typing) { teclado() }
+}
+
+function teclado() {
+    var largura = 10 * 16 + 8
+    var altura = array_length(teclas) * 13 + 34
+    var px = 160 - largura / 2
+    var py = 180 - altura - 6
+    draw_rectangle(0, 0, 320, 180, 0x000000, 0.55)
+    draw_rectangle(px, py, largura, altura, 0x0A1020, 0.95)
+    var mostrado = value
+    if (mostrado == "") { mostrado = "_" }
+    draw_text(px + 4, py + 4, mostrado, 11, 0xFFFFFF)
+    for (var linha = 0; linha < array_length(teclas); linha += 1) {
+        for (var col = 0; col < string_length(teclas[linha]); col += 1) {
+            var c = string_char_at(teclas[linha], col + 1)
+            if (shift) { c = string_upper(c) }
+            var tx = px + 4 + col * 16
+            var ty = py + 20 + linha * 13
+            if (linha == ky && col == kx) { draw_rectangle(tx, ty, 15, 12, accent, 0.9) }
+            draw_text(tx + 7 - string_width(c, 10) / 2, ty + 1, c, 10, 0xFFFFFF)
+        }
+    }
+    draw_text(px + 4, py + altura - 11, "A: digitar  X: apagar  Y: maiúscula  Start: pronto", 8, 0xE0E8FF, 0.85)
+}

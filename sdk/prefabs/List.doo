@@ -1,0 +1,57 @@
+object List extends UIElement
+
+// Lista com rolagem: mostra algumas linhas por vez e o direcional anda nelas. Quando o foco está na
+// primeira linha e você sobe (ou na última e desce), o foco sai da lista para o vizinho, como esperado.
+// No seu step, leia `clicked` (vale um quadro) e `index`.
+//     var l = menu.list(20, 40, 180, 60, ["Fase 1", "Fase 2", "Fase 3"])
+
+var items = []
+var index = 0          // linha escolhida
+var scroll = 0         // primeira linha visível
+var size = 10
+var row = 13           // altura de cada linha
+var background = 0x101828
+var clicked = false
+
+function focusable() { return visible && array_length(items) > 0 }
+
+function rows() { return max(1, floor(h / row)) }
+
+function activate() {
+    clicked = true
+    return true
+}
+
+function reset() { clicked = false }
+
+function navigate(dx, dy) {   // o direcional anda na lista; nas pontas, deixa o foco sair
+    if (dy == 0) { return false }
+    var novo = index + dy
+    if (novo < 0 || novo >= array_length(items)) { return false }
+    index = novo
+    scroll = clamp(scroll, index - rows() + 1, index)
+    return true
+}
+
+function paint(focused, t) {
+    draw_rectangle(x, y, w, h, background, 0.85 * alpha)
+    var n = array_length(items)
+    scroll = clamp(scroll, max(0, index - rows() + 1), max(0, min(index, n - rows())))
+    for (var i = 0; i < rows(); i += 1) {
+        var j = scroll + i
+        if (j >= n) { break }
+        var ly = y + i * row
+        if (j == index) {
+            var a = 0.35
+            if (focused) { a = 0.55 + 0.15 * sin(t * 5) }
+            draw_rectangle(x, ly, w, row, accent, a * alpha)
+        }
+        draw_text(x + 4, ly + (row - size) / 2, items[j], size, color, alpha)
+    }
+    if (n > rows()) {   // barra de rolagem
+        var alturaBarra = max(4, h * rows() / n)
+        var topo = y + (h - alturaBarra) * scroll / (n - rows())
+        draw_rectangle(x + w - 3, y, 2, h, 0xFFFFFF, 0.15 * alpha)
+        draw_rectangle(x + w - 3, topo, 2, alturaBarra, 0xFFFFFF, 0.6 * alpha)
+    }
+}

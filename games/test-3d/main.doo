@@ -12,6 +12,7 @@ var contadas = 0        // moedas já somadas aos pontos
 var pisadas = 0         // bolotas já somadas aos pontos
 var pontos = 0
 var recorde = 0
+var recordeNome = ""    // quem fez o recorde, digitado no teclado da tela
 var noite = false
 var ps1 = false
 var orbita = 0
@@ -46,12 +47,14 @@ var fim
 var tFim
 var tMotivo
 var tPontos
+var campoNome
 var tRecordeFim
 var bDeNovo
 var bVoltar
 
 function create() {
     recorde = save_get("recorde", 0)
+    recordeNome = save_get("recorde_nome", "")
     cenario()
     player = instance_create(Player, vec3(0, 1, 0))
     interface()
@@ -159,8 +162,10 @@ function interface() {
     tPontos = centrado(fim, "", 68, 15)
     tRecordeFim = centrado(fim, "", 90, 10)
     tRecordeFim.color = 0xFFE070
-    bDeNovo = fim.button("Jogar de novo", 110, 112, 100, 20)
-    bVoltar = fim.button("Voltar ao título", 110, 138, 100, 20)
+    campoNome = fim.field("Nome", 100, 108, 120, "")
+    campoNome.max = 10
+    bDeNovo = fim.button("Jogar de novo", 110, 132, 100, 20)
+    bVoltar = fim.button("Voltar ao título", 110, 156, 100, 20)
 }
 
 function centrado(canvas, s, y, tamanho) {
@@ -202,7 +207,7 @@ function mostrarTitulo() {
     player.controllable = false
     player.follow_camera = false
     reposicionar()
-    tRecorde.text = "Recorde: " + recorde
+    tRecorde.text = "Recorde: " + placar()
     hud.visible = false
     menu(titulo, bJogar)
 }
@@ -259,6 +264,11 @@ function carregarFase(n) {
     }
 }
 
+function placar() {   // "4590" ou "4590 - ANA"
+    if (recordeNome == "") { return "" + recorde }
+    return recorde + " - " + recordeNome
+}
+
 function terminar(venceu, motivo) {
     estado = "fim"
     player.controllable = false
@@ -271,12 +281,14 @@ function terminar(venceu, motivo) {
     }
     tMotivo.text = motivo
     tPontos.text = "Pontos: " + pontos
+    campoNome.visible = pontos > recorde
     if (pontos > recorde) {
         recorde = pontos
         save_set("recorde", recorde)
-        tRecordeFim.text = "Novo recorde!"
+        tRecordeFim.text = "Novo recorde! Quem foi?"
+        campoNome.value = recordeNome
     } else {
-        tRecordeFim.text = "Recorde: " + recorde
+        tRecordeFim.text = "Recorde: " + placar()
     }
     menu(fim, bDeNovo)
 }
@@ -355,6 +367,10 @@ function step() {
     } else if (estado == "jogando") {
         jogar()
     } else {
+        if (campoNome.changed) {   // teclado da tela: guarda o nome de quem fez o recorde
+            recordeNome = campoNome.value
+            save_set("recorde_nome", recordeNome)
+        }
         if (bDeNovo.clicked) { comecar() }
         if (bVoltar.clicked) { mostrarTitulo() }
     }

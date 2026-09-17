@@ -305,7 +305,8 @@ Tudo é função solta, com os nomes da GML — quem vem do GameMaker já sabe e
 | `lengthdir_x(dist, dir)` / `lengthdir_y(dist, dir)` | Componentes de um vetor em ângulo |
 | `angle_difference(a, b)` | Caminho mais curto entre dois ângulos, -180..180 |
 
-**Texto** — as posições começam em **1**, como na GML
+**Texto** — as posições começam em **1** e contam **caracteres**, não bytes, como na GML: em `"ação"`,
+`string_length` é 4 e `string_char_at(s, 3)` é `"ç"`
 
 | Função | Descrição |
 |---|---|
@@ -728,20 +729,24 @@ heightmap como máscara para a segunda textura aparecer nos morros. `tiling2` re
 separado (0 = o mesmo `tiling`). A segunda textura custa uma passada a mais, então dobra os triângulos do
 terreno no orçamento.
 
-### UI: Canvas, Text, Image, Button, Slider
+### UI: Canvas, Text, Image, Button, Slider, TextField, List
 
 ```doo
 var menu = instance_create(Canvas)
-var fundo = menu.image("", 0, 0, 640, 480)   // path "" = painel da cor `color`
+var fundo = menu.image("", 0, 0, 320, 180)   // path "" = painel da cor `color`
 fundo.color = 0x000000
 fundo.alpha = 0.6
-var jogar = menu.button("Jogar", 220, 200, 200, 44)
-var volume = menu.slider("Volume", 220, 260, 200, 0, 100, 80)
-menu.text("Menu", 280, 120, 32)
+var jogar = menu.button("Jogar", 110, 70, 100, 20)
+var volume = menu.slider("Volume", 90, 96, 140, 0, 100, 80)
+var nome = menu.field("Nome", 90, 120, 140, "")
+var fases = menu.list(90, 140, 140, 26, ["Fase 1", "Fase 2", "Fase 3"])
+menu.text("Menu", 130, 40, 16)
 
-// no update:
+// no step:
 if (jogar.clicked) { ... }
 if (volume.changed) { ... volume.value ... }
+if (nome.changed) { ... nome.value ... }
+if (fases.clicked) { ... fases.index ... }
 ```
 
 `Canvas`:
@@ -750,7 +755,7 @@ if (volume.changed) { ... volume.value ... }
 - Cuida do foco: o direcional leva ao elemento mais próximo naquela direção, A aperta botões e
   esquerda/direita ajustam sliders.
 - Campos: `visible`, `active` (false = só mostra, bom para HUD), `sounds`, `accent` (cor do foco).
-- Funções: `text`, `image`, `button`, `slider`, `add(elemento)` e `focus_on(elemento)`.
+- Funções: `text`, `image`, `button`, `slider`, `field`, `list`, `add(elemento)` e `focus_on(elemento)`.
 
 | Elemento | Campos principais |
 |---|---|
@@ -759,9 +764,20 @@ if (volume.changed) { ... volume.value ... }
 | `Image` | `path` |
 | `Button` | `text`, `size`, `background`, `clicked` (vale um quadro) |
 | `Slider` | `label`, `value`, `min`, `max`, `step`, `changed` (vale um quadro) |
+| `TextField` | `label`, `value`, `max`, `placeholder`, `changed` (vale um quadro) |
+| `List` | `items`, `index`, `row` (altura da linha), `clicked` (vale um quadro) |
+
+**`TextField`** abre um **teclado na tela** quando você aperta A, como o do PSP: o direcional escolhe a
+letra, A digita, X apaga, Y alterna maiúscula, Start confirma e B cancela (devolve o texto de antes). Tem
+acento e `ç` — as funções de texto contam caracteres, então apagar tira a letra inteira.
+
+**`List`** mostra as linhas que couberem em `h` e rola conforme você anda. Na primeira linha, subir passa o
+foco para o elemento de cima; na última, descer faz o mesmo — a lista não prende o foco.
 
 Elementos próprios: `object MeuWidget extends UIElement`, sobrescrevendo `paint(focused, t)` e, se interagir,
-`focusable()`, `activate()`, `adjust(d)` e `reset()`.
+`focusable()`, `activate()`, `adjust(d)`, `navigate(dx, dy)` (consumir o direcional, como a lista) e
+`reset()`. Para tomar o controle inteiro enquanto está aberto (como o teclado na tela), devolva `true` em
+`holding()` e trate o controle em `input()`.
 
 Menu de pausa típico: `time_set_scale(0)`, `jogador.controllable = false`, `menu.visible = true`.
 
@@ -886,6 +902,6 @@ Isto não é escolha, é trabalho a fazer:
 | Física | Sem massa (dois `Rigidbody` se empurram por igual); cápsula sempre em pé; duas caixas giradas se tocando usam uma aproximação um pouco maior nas quinas |
 | Render | Sombra só de mancha (sem sombra projetada); animação de modelo só por quadros-chave (sem esqueleto); terreno com duas texturas no máximo |
 | Áudio | Só WAV PCM; som posicional com esquerda/direita só em saída estéreo |
-| UI | Só controle (sem mouse/toque); sem campo de texto nem listas com rolagem |
+| UI | Só controle (sem mouse/toque) |
 | Controle | Teclado só para o jogador 1 |
 | Loja | Servidor de arquivos estáticos, sem conta nem pagamento |
