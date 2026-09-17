@@ -207,6 +207,7 @@ var hits = 0
 function collision(other) { if (object_name(other) == Floor) { hits += 1 } }
 )"};
 static const SourceFile floorSrc = {"floor.doo", "object Floor\nuse BoxCollider\n"};
+static const SourceFile logSrc = {"log.doo", "object Log\nuse CapsuleCollider\n"};
 static const SourceFile hillSrc = {"hill.doo", "object Hill\nuse TerrainCollider\n"};
 
 // Inheritance: merged fields/functions, derived initializers win, virtual calls, super, errors in the parent's file.
@@ -525,7 +526,7 @@ static int run() {
     CHECK(!std::get<bool>(vm.call(*listaUi, "navigate", {Value(0.0), Value(1.0)})));  // acabou: o foco sai
 
 
-    for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc, hillSrc, chefeSrc, lacaioSrc, lacoSrc}, vm, false)) defs[d->name] = d;
+    for (auto& d : compileAll({levelSrc, enemySrc, ballSrc, floorSrc, hillSrc, chefeSrc, lacaioSrc, lacoSrc, logSrc}, vm, false)) defs[d->name] = d;
     auto level = spawn("Level", {});
     CHECK(std::get<std::string>(vm.call(*level, "report")) == "Enemy 65 2");
 
@@ -609,6 +610,33 @@ static int run() {
     auto noMorro = spawn("Ball", {502, 25, 0});
     for (int i = 0; i < 120; i++) physicsStep(vm, scene, 1.0 / 60);  // cai (uns 61 quadros) e escorrega
     CHECK(std::get<Vec3>(*noMorro->field("position")).x < 501);
+
+    // Massa: o mais pesado cede menos no empurrão, e massa 0 não sai do lugar
+    auto leve = spawn("Ball", {800, 0.5, 0});
+    auto pesada = spawn("Ball", {800.6, 0.5, 0});
+    *pesada->field("mass") = Value(3.0);
+    for (int i = 0; i < 40; i++) physicsStep(vm, scene, 1.0 / 60);
+    double andouLeve = 800 - std::get<Vec3>(*leve->field("position")).x;
+    double andouPesada = std::get<Vec3>(*pesada->field("position")).x - 800.6;
+    CHECK(andouLeve > 0.28 && std::fabs(andouLeve - 3 * andouPesada) < 0.01);  // 3x mais leve, 3x mais empurrada
+
+    auto fixa = spawn("Ball", {850, 0.5, 0});
+    *fixa->field("mass") = Value(0.0);
+    *fixa->field("gravity") = Value(0.0);
+    auto bate = spawn("Ball", {849.4, 0.5, 0});
+    *bate->field("gravity") = Value(0.0);
+    for (int i = 0; i < 40; i++) physicsStep(vm, scene, 1.0 / 60);
+    CHECK(std::get<Vec3>(*fixa->field("position")).x == 850);                        // não saiu do lugar
+    CHECK(std::get<Vec3>(*bate->field("position")).x < 849.05);                       // cedeu sozinha
+
+    // Cápsula deitada: girada 90 graus em Z, o topo dela fica no raio, não na metade da altura
+    auto tronco = spawn("Log", {700, 0, 0});
+    *tronco->field("height") = Value(4.0);
+    *tronco->field("radius") = Value(0.5);
+    *tronco->field("rotation") = Value(Vec3{0, 0, 90});
+    auto emCima = spawn("Ball", {700.8, 5, 0});
+    for (int i = 0; i < 120; i++) physicsStep(vm, scene, 1.0 / 60);
+    CHECK(std::fabs(std::get<Vec3>(*emCima->field("position")).y - 1.0) < 0.02);      // 0,5 do tronco + 0,5 da bola
 
     // Terrain: a 2x2 heightmap ramp (0 -> 4 along x) far from the rest; the ball rests on the triangle's surface
     auto hill = spawn("Hill", {100, 0, 0});

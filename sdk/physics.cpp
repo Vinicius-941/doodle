@@ -48,6 +48,7 @@ struct Body {
     bool rigid = false, collider = false, solid = false;  // solid = collider that isn't a trigger
     bool grounded = false;
     bool girado = false;
+    double massa = 1;
     Mat3 rot;  // local -> mundo (identidade sem girar)
 };
 
@@ -58,10 +59,12 @@ void registerPhysics(VM& vm) {
     Value zero(Vec3{}), no(false);
     vm.components["BoxCollider"] = {{"position", zero}, {"size", Value(Vec3{1, 1, 1})}, {"rotation", zero}, {"trigger", no}};
     vm.components["SphereCollider"] = {{"position", zero}, {"radius", Value(0.5)}, {"trigger", no}};
-    vm.components["CapsuleCollider"] = {{"position", zero}, {"radius", Value(0.5)}, {"height", Value(2.0)}, {"trigger", no}};
+    vm.components["CapsuleCollider"] = {{"position", zero}, {"radius", Value(0.5)}, {"height", Value(2.0)},
+                                        {"rotation", zero}, {"trigger", no}};
     // slope_limit: rampa até esse ângulo é chão (fica parado nela); mais íngreme que isso, escorrega
+    // mass: quem tem mais massa cede menos no empurrão; 0 = não sai do lugar (plataforma, porta)
     vm.components["Rigidbody"] = {{"position", zero}, {"velocity", zero}, {"gravity", Value(20.0)}, {"grounded", no},
-                                  {"slope_limit", Value(45.0)}};
+                                  {"slope_limit", Value(45.0)}, {"mass", Value(1.0)}};
     // heights: rows of 0..1 (nil = flat) spread over size.x × size.z around position, scaled by size.y
     vm.components["TerrainCollider"] = {{"position", zero}, {"size", Value(Vec3{10, 1, 10})}, {"heights", Value()}};
     // (x, y, z) -> altura do chão sólido mais alto abaixo desse ponto, ou nil se não houver nada embaixo.
@@ -167,15 +170,18 @@ static bool toBody(const std::shared_ptr<Instance>& s, Body& b) {
     b.pos = vec(i, "position");
     if (uses(i, "BoxCollider")) {
         b.half = vec(i, "size") * 0.5;
-        Vec3 g = vec(i, "rotation");
-        b.girado = g.x != 0 || g.y != 0 || g.z != 0;
-        if (b.girado) b.rot = rotacao(g);
     } else if (uses(i, "SphereCollider")) {
         b.r = number(i, "radius");
     } else if (uses(i, "CapsuleCollider")) {
         b.r = number(i, "radius");
         b.half.y = std::max(0.0, number(i, "height") / 2 - b.r);
     }
+    if (uses(i, "BoxCollider") || uses(i, "CapsuleCollider")) {  // caixa e cápsula giram; esfera é redonda
+        Vec3 g = vec(i, "rotation");
+        b.girado = g.x != 0 || g.y != 0 || g.z != 0;
+        if (b.girado) b.rot = rotacao(g);
+    }
+    if (b.rigid) b.massa = std::max(0.0, number(i, "mass"));
     b.solid = b.collider && !truthy(*i.field("trigger"));
     return true;
 }
@@ -270,22 +276,25 @@ void physicsStep(VM& vm, const std::vector<std::shared_ptr<Instance>>& scene, do
         }
     }
 
-    // Dois Rigidbody se empurram: massas iguais, cada um cede metade e a aproximação entre eles zera.
-    // Uma passada só por quadro, então pilha alta acomoda em alguns quadros em vez de na hora.
+    // Dois Rigidbody se empurram, cada um cedendo na medida da sua massa: o mais pesado sai menos do lugar,
+    // e massa 0 não sai. Uma passada só por quadro, então pilha alta acomoda em alguns quadros.
     for (size_t a = 0; a < bodies.size(); a++) {
         for (size_t c = a + 1; c < bodies.size(); c++) {
             Body &x = bodies[a], &y = bodies[c];
             Vec3 push;
             if (!x.rigid || !y.rigid || !x.solid || !y.solid || !overlap(x, y, push)) continue;
-            x.pos = x.pos + push * 0.5;
-            y.pos = y.pos - push * 0.5;
+            double px = x.massa > 0 ? 1 / x.massa : 0, py = y.massa > 0 ? 1 / y.massa : 0;
+            if (px + py == 0) continue;  // dois imóveis: ninguém cede
+            double fx = px / (px + py), fy = py / (px + py);
+            x.pos = x.pos + push * fx;
+            y.pos = y.pos - push * fy;
             double len = std::sqrt(push.dot(push));
             if (len == 0) continue;
             Vec3 n = push * (1 / len);
             double rel = (x.vel - y.vel).dot(n);
-            if (rel < 0) {  // estão se aproximando: cancela essa parte da velocidade nos dois
-                x.vel = x.vel - n * (rel / 2);
-                y.vel = y.vel + n * (rel / 2);
+            if (rel < 0) {  // estão se aproximando: cancela essa parte da velocidade, na medida da massa
+                x.vel = x.vel - n * (rel * fx);
+                y.vel = y.vel + n * (rel * fy);
             }
             if (n.y > 0.7) x.grounded = true;   // x ficou por cima de y
             if (n.y < -0.7) y.grounded = true;

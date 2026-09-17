@@ -471,8 +471,8 @@ objeto (ou um ancestral) já declare o campo com `var`. Todos acrescentam `posit
 |---|---|---|
 | `BoxCollider` | `size` vec3(1, 1, 1), `rotation` vec3(), `trigger` false | Caixa centrada em `position`, girada por `rotation` (graus, mesma ordem do `draw_mesh`) |
 | `SphereCollider` | `radius` 0.5, `trigger` false | Esfera |
-| `CapsuleCollider` | `radius` 0.5, `height` 2, `trigger` false | Cápsula em pé |
-| `Rigidbody` | `velocity` vec3(), `gravity` 20, `grounded` false, `slope_limit` 45 | A física move o objeto e o empurra para fora do que é sólido |
+| `CapsuleCollider` | `radius` 0.5, `height` 2, `rotation` vec3(), `trigger` false | Cápsula, em pé ou deitada pelo `rotation` |
+| `Rigidbody` | `velocity` vec3(), `gravity` 20, `grounded` false, `slope_limit` 45, `mass` 1 | A física move o objeto e o empurra para fora do que é sólido |
 | `TerrainCollider` | `size` vec3(10, 1, 10), `heights` nil | Chão com relevo (veja o prefab `Terrain`) |
 | `AudioSource` | `sound` "", `volume` 1, `loop` false, `range` 20 | Som no mundo (veja `audio_source_play`) |
 
@@ -481,11 +481,12 @@ Física:
 - Só objetos com `Rigidbody` se movem; eles são empurrados para fora de colisores sólidos e do terreno.
   `grounded` fica verdadeiro quando estão apoiados em algo.
 - `trigger = true`: não bloqueia, só gera `collision` (moedas, zonas).
-- Dois objetos com `Rigidbody` se empurram: cada um cede metade da sobreposição e a aproximação entre eles
-  para. É uma passada por quadro, então uma pilha alta se acomoda em alguns quadros.
+- Dois objetos com `Rigidbody` se empurram, cada um cedendo na medida da sua `mass`: o dobro de massa sai
+  metade do lugar. `mass = 0` não sai nenhum, o que serve para plataforma e porta que empurram quem encosta.
+  É uma passada por quadro, então uma pilha alta se acomoda em alguns quadros.
 - `collision(other)` é chamado nos dois lados de cada par que se toca e que tem ao menos um `Rigidbody`.
-- Caixa girada vira rampa ou parede na diagonal: desenhe com o mesmo `rotation` que o colisor usa, e o
-  que se vê é o que colide. Cápsulas continuam sempre em pé.
+- Caixa e cápsula giram pelo `rotation`: caixa girada vira rampa ou parede na diagonal, e cápsula girada
+  vira tronco caído. Desenhe com o mesmo `rotation` do colisor, e o que se vê é o que colide.
 - **Rampa ou ladeira:** até `slope_limit` graus (45 por padrão) é chão — o objeto sobe andando, fica parado
   sem escorregar e `grounded` fica verdadeiro. Mais inclinado que isso, ele escorrega e não conta como
   apoiado. Vale para caixa girada e para o terreno.
@@ -898,15 +899,24 @@ hardware da Fase 3 (aperte **F3** para ver, ou rode com `--fps`).
 O terreno vira uma grade de no máximo 65 × 65 (8 mil triângulos) e as malhas prontas são de baixa
 contagem, de propósito: esfera com 320 triângulos, cápsula com 672.
 
+Estas outras também são escolhas, não falta de trabalho — são o que dá a cara da época:
+
+| Escolha | Por quê |
+|---|---|
+| Sombra só de mancha, sem sombra projetada | É o que os jogos da época faziam, e custa um disco no chão |
+| Animação de modelo por quadros-chave, sem esqueleto | O PS1 animava assim: os quadros já vêm deformados |
+| Interface só de controle, sem mouse nem toque | É um console; texto se escreve no teclado da tela |
+| Um tipo de número só (ponto flutuante) | É o `real` da GML |
+| Sem Ogg | O Windows não traz esse decodificador, e trazer um seria dependência nova |
+
 ### 15.2 O que ainda falta
 
 Isto não é escolha, é trabalho a fazer:
 
 | Área | Limite atual |
 |---|---|
-| Física | Sem massa (dois `Rigidbody` se empurram por igual); cápsula sempre em pé; duas caixas giradas se tocando usam uma aproximação um pouco maior nas quinas |
-| Render | Sombra só de mancha (sem sombra projetada); animação de modelo só por quadros-chave (sem esqueleto); terreno com duas texturas no máximo |
-| Áudio | Sem streaming: o som é decodificado inteiro na memória, então música longa pesa; posicional com esquerda/direita só em saída estéreo |
-| UI | Só controle (sem mouse/toque) |
-| Controle | Teclado só para o jogador 1 |
-| Loja | Servidor de arquivos estáticos, sem conta nem pagamento |
+| Física | Sem rotação por torque (o objeto só gira se o jogo girar); dois corpos girados se tocando colidem um pouco antes nas quinas |
+| Render | Terreno com duas texturas no máximo |
+| Áudio | Sem streaming: o som é decodificado inteiro na memória, então música longa pesa na memória; esquerda/direita só em saída estéreo |
+| Controle | O teclado do PC vale só como jogador 1 |
+| Loja | Servidor de arquivos estáticos: sem conta, sem pagamento e sem assinatura do pacote |
