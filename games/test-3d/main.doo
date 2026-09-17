@@ -88,6 +88,13 @@ function cenario() {
     casa.range = 22
     casa.tocar()
 
+    for (var i = 0; i < 3; i++) {                      // pássaros dando voltas lá em cima
+        var passaro = instance_create(Passaro, vec3(0, 0, 0))
+        passaro.fase = i * 2.1
+        passaro.raio = 22 + i * 5
+        passaro.altura = 10 + i * 2
+    }
+
     var fumaca = instance_create(ParticleSystem, vec3(-7, 3.4, 8))
     fumaca.color = 0xB8B8B8
     fumaca.size = 0.3

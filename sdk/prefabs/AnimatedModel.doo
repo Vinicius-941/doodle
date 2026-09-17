@@ -1,0 +1,50 @@
+object AnimatedModel
+
+// Modelo animado por quadros-chave, do jeito da época: cada quadro é um .obj com a mesma malha (mesmos
+// vértices, na mesma ordem) e o console mistura um no outro, sem osso nenhum.
+//     var bicho = instance_create(AnimatedModel, vec3(0, 1, 0))
+//     bicho.frames = ["voo1.obj", "voo2.obj", "voo3.obj"]
+//     bicho.fps = 8
+// Com smooth = false ele troca seco de quadro, como jogos que animavam a 10 quadros por segundo.
+
+var position = vec3(0, 0, 0)
+var rotation = vec3(0, 0, 0)
+var scale = 1
+var color = 0xFFFFFF
+var texture = ""      // "" = a textura que vier do .mtl de cada quadro
+var frames = []
+var fps = 8
+var loop = true
+var playing = true
+var smooth = true
+var frame = 0         // quadro atual, com a fração entre ele e o próximo
+
+function step() {
+    var n = array_length(frames)
+    if (!playing || n < 2) { return }
+    frame += fps * delta_time
+    if (frame >= n) {
+        if (loop) {
+            frame -= n
+        } else {
+            frame = n - 1
+            playing = false
+        }
+    }
+}
+
+function play(lista, velocidade) {   // troca de animação e começa do zero
+    frames = lista
+    fps = velocidade
+    frame = 0
+    playing = true
+}
+
+function draw() {
+    var n = array_length(frames)
+    if (n == 0) { return }
+    var i = floor(frame) % n
+    var j = (i + 1) % n
+    var t = smooth ? frame - floor(frame) : 0
+    draw_mesh_mix(frames[i], frames[j], t, position, rotation, scale, color, texture)
+}

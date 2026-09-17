@@ -1060,6 +1060,7 @@ static GLuint texture(const fs::path& p) {  // like image(), but a missing textu
 struct Model {
     struct Part { GLuint list, tex; Vec3 color; };
     std::vector<Part> parts;
+    std::vector<ObjPart> fonte;  // os triângulos crus: usados para misturar dois quadros de animação
 };
 static std::map<fs::path, Model> models;
 
@@ -1087,6 +1088,7 @@ static const Model& model(const fs::path& p) {
         listaTris[list] = (long long)part.tris.size() / 3;
         m.parts.push_back({list, part.texture.empty() ? 0 : texture(dir / fs::u8path(part.texture)), part.color});
     }
+    m.fonte = std::move(parts);
     return models[p] = std::move(m);
 }
 
@@ -1158,19 +1160,47 @@ static GLuint terrainMesh(const std::shared_ptr<Array>& rows, Vec3 size, double 
     return list;
 }
 
+static void useTexture(GLuint tex) {
+    if (shader) glUniform1i(shader->useTexture, tex ? 1 : 0);
+    if (!tex) return;
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);  // crisp texels up close, no shimmer far
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+}
+
 static void drawPart(GLuint list, GLuint tex, Vec3 rgb) {  // lit color x texture (GL_MODULATE / the shader)
     quadro.chamadas++;
     quadro.tris += listaTris[list];
     glColor3d(rgb.x, rgb.y, rgb.z);
-    if (shader) glUniform1i(shader->useTexture, tex ? 1 : 0);
-    if (tex) {
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);  // crisp texels up close, no shimmer far
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    }
+    useTexture(tex);
     glCallList(list);
     if (tex) glDisable(GL_TEXTURE_2D);
+}
+
+// Dois quadros-chave da mesma malha, misturados vértice a vértice (0 = o primeiro, 1 = o segundo).
+// É como o PS1 animava personagem: sem osso, os quadros já vêm deformados e o console interpola.
+static void drawMix(const Model& A, const Model& B, double t, Vec3 tint, GLuint tex) {
+    if (A.fonte.size() != B.fonte.size()) throw std::runtime_error("os quadros precisam ter a mesma malha");
+    for (size_t i = 0; i < A.fonte.size(); i++) {
+        const std::vector<ObjVertex>&va = A.fonte[i].tris, &vb = B.fonte[i].tris;
+        if (va.size() != vb.size()) throw std::runtime_error("os quadros precisam ter a mesma malha");
+        quadro.chamadas++;
+        quadro.tris += (long long)va.size() / 3;
+        Vec3 c = A.fonte[i].color;
+        glColor3d(c.x * tint.x, c.y * tint.y, c.z * tint.z);
+        GLuint t2 = tex ? tex : A.parts[i].tex;
+        useTexture(t2);
+        glBegin(GL_TRIANGLES);
+        for (size_t k = 0; k < va.size(); k++) {
+            Vec3 p = va[k].pos + (vb[k].pos - va[k].pos) * t, n = va[k].normal + (vb[k].normal - va[k].normal) * t;
+            glNormal3d(n.x, n.y, n.z);  // GL_NORMALIZE cuida do tamanho depois da mistura
+            glTexCoord2d(va[k].u, va[k].v);
+            glVertex3d(p.x, p.y, p.z);
+        }
+        glEnd();
+        if (t2) glDisable(GL_TEXTURE_2D);
+    }
 }
 
 static double opt(Args& a, size_t i, double fallback) { return i < a.size() ? argNum(a, i) : fallback; }
@@ -1346,6 +1376,30 @@ static void registerSdk() {
 
     // (Mesh.X or "model.obj", position, rotation in degrees, scale, color, texture = "")
     // color tints: 0xFFFFFF keeps a model's own colors/textures. texture (optional) replaces the material's.
+    // (quadroA.obj, quadroB.obj, mistura 0..1, posição, rotação, escala, cor, textura = "")
+    vm.addNative("draw_mesh_mix", [](Instance&, Args& a) {
+        const Model& A = model(active->base / fs::u8path(str(a, 0)));
+        const Model& B = model(active->base / fs::u8path(str(a, 1)));
+        double t = std::clamp(argNum(a, 2), 0.0, 1.0);
+        Vec3 p = argVec(a, 3), r = argVec(a, 4), s;
+        if (a.size() > 5 && std::holds_alternative<double>(a[5])) {
+            double k = argNum(a, 5);
+            s = {k, k, k};
+        } else {
+            s = argVec(a, 5);
+        }
+        GLuint tex = a.size() > 7 && !str(a, 7).empty() ? texture(active->base / fs::u8path(str(a, 7))) : 0;
+        mode3D();
+        glPushMatrix();
+        glTranslated(p.x, p.y, p.z);
+        glRotated(r.y, 0, 1, 0);  // Unity order: Z, then X, then Y
+        glRotated(r.x, 1, 0, 0);
+        glRotated(r.z, 0, 0, 1);
+        glScaled(s.x, s.y, s.z);
+        drawMix(A, B, t, rgb01(argNum(a, 6)), tex);
+        glPopMatrix();
+        return Value();
+    });
     vm.addNative("draw_mesh", [](Instance&, Args& a) {
         const Model* mdl = nullptr;
         int m = -1;

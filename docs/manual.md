@@ -510,6 +510,7 @@ arquivo são relativos à pasta do jogo.
 | Função | Descrição |
 |---|---|
 | `camera_set(posição, alvo, fov = 60)` | Câmera em perspectiva (vale para o quadro) |
+| `draw_mesh_mix(quadroA, quadroB, mistura, posição, rotação, escala, cor, textura = "")` | Dois `.obj` da mesma malha misturados vértice a vértice (`mistura` 0..1): é assim que se anima modelo (veja o prefab `AnimatedModel`) |
 | `camera_set_ortho(posição, alvo, largura)` | Câmera sem perspectiva: `largura` unidades do mundo cabem na tela de ponta a ponta (bom para visão isométrica e de cima) |
 | `draw_mesh(malha, posição, rotação, escala, cor, textura = "")` | Desenha uma malha. `malha` é `mesh_cube/Sphere/Cylinder/Capsule/Plane` ou um arquivo `.obj`. `rotação` em graus (vec3, ordem da Unity). `escala` é número ou vec3. `cor` tinge (0xFFFFFF mantém as cores do modelo) |
 | `light_directional(direção, cor, intensidade = 1)` | Luz tipo sol (direção para onde ela aponta) |
@@ -657,6 +658,34 @@ lampada.range = 10
 
 Campos: `object_name` (`lt_point` padrão, `lt_spot`, `lt_directional`), `enabled`, `color`, `intensity`,
 `range`, `direction` (vec3(0, -1, 0)), `angle` (45).
+
+### AnimatedModel
+
+Animação de modelo do jeito da época: cada quadro é um `.obj` com a **mesma malha** (mesmos vértices, na
+mesma ordem), e o console mistura um no outro. Sem osso, sem esqueleto — o PS1 animava personagem assim.
+
+```doo
+var bicho = instance_create(AnimatedModel, vec3(0, 1, 0))
+bicho.frames = ["voo1.obj", "voo2.obj", "voo3.obj"]
+bicho.fps = 8
+bicho.scale = 2
+bicho.rotation = vec3(0, 90, 0)
+```
+
+| Campo | |
+|---|---|
+| `frames` | Os `.obj` em ordem; o último volta para o primeiro |
+| `fps` | Quadros por segundo da animação |
+| `loop` / `playing` | Repetir; e ligar/desligar o avanço |
+| `smooth` | `false` troca seco de quadro, como jogos que animavam a 10 quadros por segundo |
+| `frame` | Em que ponto da animação está, com a fração entre dois quadros |
+| `position`, `rotation`, `scale`, `color`, `texture` | Como no `draw_mesh` |
+
+`play(lista, fps)` troca de animação e recomeça do zero. Estenda o prefab para dar comportamento ao bicho
+(`object Passaro extends AnimatedModel`, chamando `super.step()`).
+
+Os quadros precisam bater vértice a vértice: exporte todos do mesmo modelo, só movendo o que é para animar.
+O `scripts/passaro.py` gera um exemplo de três quadros.
 
 ### Terrain
 
@@ -836,7 +865,7 @@ Isto não é escolha, é trabalho a fazer:
 | Área | Limite atual |
 |---|---|
 | Física | Sem massa (dois `Rigidbody` se empurram por igual); cápsula sempre em pé; duas caixas giradas se tocando usam uma aproximação um pouco maior nas quinas |
-| Render | Sem sombras; modelos sem animação; terreno com duas texturas no máximo |
+| Render | Sem sombras; animação de modelo só por quadros-chave (sem esqueleto); terreno com duas texturas no máximo |
 | Áudio | Só WAV PCM; som posicional com esquerda/direita só em saída estéreo |
 | UI | Só controle (sem mouse/toque); sem campo de texto nem listas com rolagem |
 | Controle | Teclado só para o jogador 1 |

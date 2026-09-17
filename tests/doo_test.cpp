@@ -437,6 +437,35 @@ static int run() {
     for (int i = 0; i < 9; i++) vm.call(*fx, "step");  // past the 0.8 s lifetime
     CHECK(!fx->alive);                                   // auto_destroy
 
+    // SDK prefab AnimatedModel (arquivo real): anda nos quadros-chave e mistura um no outro
+    std::string qa, qb;
+    double mistura = -1;
+    vm.addNative("draw_mesh_mix", [&](Instance&, std::vector<Value>& a) {
+        qa = std::get<std::string>(a[0]);
+        qb = std::get<std::string>(a[1]);
+        mistura = std::get<double>(a[2]);
+        return Value();
+    });
+    auto bicho = vm.instantiate(compile(readPrefab("AnimatedModel"), "AnimatedModel.doo", vm, false));
+    auto lista = std::make_shared<Array>(Array{Value(std::string("a.obj")), Value(std::string("b.obj")), Value(std::string("c.obj"))});
+    vm.call(*bicho, "play", {Value(lista), Value(10.0)});  // 10 quadros/s com delta_time 0.1 = 1 quadro por step
+    vm.call(*bicho, "draw");
+    CHECK(qa == "a.obj" && qb == "b.obj" && mistura == 0);
+    vm.call(*bicho, "step");
+    vm.call(*bicho, "step");
+    vm.call(*bicho, "draw");
+    CHECK(qa == "c.obj" && qb == "a.obj" && mistura == 0);   // o último mistura de volta no primeiro
+    *bicho->field("fps") = Value(5.0);                       // meio quadro por step: cai no meio da mistura
+    vm.call(*bicho, "step");
+    vm.call(*bicho, "draw");
+    CHECK(qa == "c.obj" && qb == "a.obj" && std::fabs(mistura - 0.5) < 1e-9);  // meio caminho entre os dois
+    *bicho->field("smooth") = Value(false);
+    vm.call(*bicho, "draw");
+    CHECK(mistura == 0);                                     // troca seca: sem meio termo
+    *bicho->field("loop") = Value(false);
+    for (int i = 0; i < 20; i++) vm.call(*bicho, "step");
+    CHECK(std::get<double>(*bicho->field("frame")) == 2 && !std::get<bool>(*bicho->field("playing")));
+
     // SDK UI prefabs (real files): the Canvas moves focus spatially, A clicks, left/right adjust a slider
     int pressed = -1;
     const char* buttons[] = {"btn_up", "btn_down", "btn_left", "btn_right", "btn_a"};

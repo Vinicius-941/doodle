@@ -1,0 +1,23 @@
+object Passaro extends AnimatedModel
+
+// Pássaro dando voltas no vale: usa o AnimatedModel do SDK, que mistura os quadros-chave do .obj.
+var raio = 26
+var altura = 11
+var vel = 0.35
+var fase = 0
+var t = 0
+
+function create() {
+    frames = ["passaro1.obj", "passaro2.obj", "passaro3.obj"]
+    fps = 9
+    scale = 1.8
+    color = 0x2E3440
+}
+
+function step() {
+    super.step()
+    t += delta_time * vel
+    var a = t + fase
+    position = vec3(cos(a) * raio, altura + sin(t * 1.7) * 1.2, sin(a) * raio)
+    rotation = vec3(0, -radtodeg(a), sin(t * 2) * 10)   // aponta para onde está indo, inclinando na curva
+}
